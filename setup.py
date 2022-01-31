@@ -8,7 +8,7 @@ with open("README.org") as f:
     long_description = f.read()
 
 setup(
-    name="ref-man",
+    name="ref-man-py",
     version=__version__,
     description="Ref Man Python Module",
     long_description=long_description,

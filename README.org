@@ -1,4 +1,4 @@
-* ref-man
+* ref-man-py
 
   Python Module for ~ref-man~ (See https://github.com/akshaybadola/ref-man).
 

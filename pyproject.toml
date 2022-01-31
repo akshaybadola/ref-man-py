@@ -1,5 +1,5 @@
 [tool.poetry]
-name = "ref-man"
+name = "ref-man-py"
 version = "0.3.9"
 description = "Ref Man Python Module"
 authors = ["Akshay <akshay.badola.cs@gmail.com>"]
@@ -35,7 +35,7 @@ pytest = "^6.2.4"
 
 [tool.poetry.scripts]
 test = "pytest:main"
-ref_man = "ref_man.__main__:main"
+ref_man = "ref_man_py.__main__:main"
 
 
 [build-system]
