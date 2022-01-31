@@ -42,8 +42,7 @@ setup(
                       "psutil>=5.8.0",
                       "PyYAML>=5.4.1",
                       "lxml>=4.6.4",
-                      "common_pyutil>=0.8.0",
-                      "tinydb>=4.6.1"],
+                      "common_pyutil>=0.8.0"],
     entry_points={
         'console_scripts': [
             'ref-man = ref_man:__main__.main',
