@@ -1,22 +1,14 @@
 [tool.poetry]
 name = "ref-man"
 version = "0.3.9"
-description = """ref-man python module.
-
-See https://github.com/akshaybadola/ref-man for the emacs library.
-
-Network requests and xml parsing can be annoying in emacs, so ref-man uses
-a separate python process for efficient (and sometimes parallel) fetching
-of network requests.
-"""
+description = "Ref Man Python Module"
 authors = ["Akshay <akshay.badola.cs@gmail.com>"]
 license = "GPL-3"
 readme = "README.org"
-homepage = "https://github.com/akshaybadola/common-pyutil"
+homepage = "https://github.com/akshaybadola/ref-man-py"
 classifiers=[
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Science/Research",
-    'Programming Language :: Python :: 3.6',
     'Programming Language :: Python :: 3.7',
     'Programming Language :: Python :: 3.8',
     'Programming Language :: Python :: 3.9',
@@ -26,7 +18,7 @@ classifiers=[
     "Topic :: Scientific/Engineering",
     "Topic :: Text Editors :: Emacs",
 ]
-keywords = ['emacs', 'semanticscholar', 'bibliography']
+keywords = ['emacs', 'semanticscholar', 'bibliography', 'ref-man']
 
 [tool.poetry.dependencies]
 python = "^3.7"

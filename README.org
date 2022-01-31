@@ -1,3 +1,31 @@
 * ref-man
 
   Python Module for ~ref-man~ (See https://github.com/akshaybadola/ref-man).
+
+  Network requests and xml parsing can be annoying in emacs, so ref-man uses a
+  separate python process for efficient (and sometimes parallel) fetching of
+  network requests.
+
+* Features
+
+** HTTP integration with Semantic Scholar API (https://www.semanticscholar.org/product/api)
+   - Fetch with multiple IDs like arxiv, ACL etc.
+   - Local files based cache to avoid redundant requests
+   - Fetches all metadata in one go (Will change soon as Semantic Scholar is
+     updating its API)
+
+** Experimental (and undocumented) Semantic Scholar Search API
+   - Mostly gleaned through analyzing network requests. Helpful for searching
+     articles.
+
+** HTTP integration with DBLP and ArXiv
+   - Supports multiple parallel requests for batch updates
+
+** Fetch PDF from a given URL
+   - Easier to fetch using python than with Emacs's callbacks
+
+** Option for proxying requests
+   - Particularly useful for PDFs if you're tunneling to your institution from
+     home or some other location and the article you want is with institutional
+     (IP based) access only.
+

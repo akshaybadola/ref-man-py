@@ -4,17 +4,14 @@ from setuptools import setup
 
 from ref_man import __version__
 
-description = """ref-man server for network requests.
-
-    Network requests and xml parsing can be annoying in emacs, so ref-man uses
-    a separate python process for efficient (and sometimes parallel) fetching
-    of network requests."""
+with open("README.org") as f:
+    long_description = f.read()
 
 setup(
     name="ref-man",
     version=__version__,
     description="Ref Man Python Module",
-    long_description=description,
+    long_description=long_description,
     url="https://github.com/akshaybadola/ref-man",
     author="Akshay Badola",
     license="GPL",
@@ -23,7 +20,6 @@ setup(
         "Intended Audience :: Science/Research",
         ("License :: OSI Approved :: "
          "GNU General Public License v3 or later (GPLv3+)"),
-        'Programming Language :: Python :: 3.6',
         'Programming Language :: Python :: 3.7',
         'Programming Language :: Python :: 3.8',
         'Programming Language :: Python :: 3.9',
