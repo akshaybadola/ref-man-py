@@ -38,10 +38,14 @@ class CacheHelper:
         local_files = [os.path.join(self.local_dir, f)
                        for f in os.listdir(self.local_dir)
                        if not f.startswith(".")]
-        with open(self.cache_file) as f:
-            cache = [x for x in f.read().split("\n") if len(x)]
-            cached_files = [x.rsplit(";")[0] for x in cache]
-        return local_files, cache, cached_files
+        if self.cache_file.exists():
+            with open(self.cache_file) as f:
+                cache = [x for x in f.read().split("\n") if len(x)]
+                cached_files = [x.rsplit(";")[0] for x in cache]
+            return local_files, cache, cached_files
+        else:
+            print(f"Cache file {self.cache_file} does not exist")
+            return local_files, [], []
 
     @property
     def cache_needs_updating(self) -> set:
@@ -78,14 +82,14 @@ class CacheHelper:
             with open(self.cache_file, "w") as f:
                 f.write("\n".join(cache))
         else:
-            self.logger.debug(f"No deleted links")
+            self.logger.debug("No deleted links")
         broken_links = [c.split(";")[0] for c in cache if c.split(";")[1] == ""]
         if broken_links:
             self.logger.debug(f"Found {len(broken_links)} broken links. Updating")
             self.update_thread = Thread(target=self.update_cache_helper, args=[broken_links])
             self.update_thread.start()
         else:
-            self.logger.debug(f"No broken links")
+            self.logger.debug("No broken links")
 
     def copy_file(self, fname: str) -> bool:
         local_path = self._local_path(fname)
@@ -105,6 +109,19 @@ class CacheHelper:
         return status
 
     def try_get_link(self, remote_path: str) -> Tuple[bool, str]:
+        """Try and fetch a shareable link for an :code:`rclone` remote_path.
+
+        :code:`rclone` remote paths are prepended with a remote :code:`name` so the path is
+        :code:`name:path`. Depending on the remote the status and error messages may
+        differ. Currently, these messages are in :code:`gdrive` format.
+
+        Args:
+            remote_path: Remote path for which to fetch the link
+
+        """
+        # NOTE:
+        # I had tried MS's `onedrive` once, but there were far too many errors and
+        # timeouts while fetching the links. Perhaps it's a rate limiting issues
         self.logger.debug(f"Fetching link for {remote_path}")
         try:
             p = Popen(f"rclone -v link {remote_path}", shell=True, stdout=PIPE, stderr=PIPE)
@@ -131,6 +148,16 @@ class CacheHelper:
         return status, link
 
     def get_link(self, fname: str, cache: Dict[str, str], warnings: List[str]) -> None:
+        """Get a link for an file name.
+
+        Copy the file to the remote path if it doesn't exist there.
+
+        Args:
+            fname: Local filename for which to fetch the link
+            cache: Cache where it's checked and stored
+            warnings: A shared variable where warnings are appened if any occur
+
+        """
         try:
             start = time.time()
             remote_path = self._remote_path(fname)
@@ -156,6 +183,11 @@ class CacheHelper:
             self.logger.error(f"Error occured for file {fname} {e}")
 
     def update_cache(self) -> None:
+        """Update the local cache
+
+        For each file on the local machine fetch a shareable link from the remote dir.
+
+        """
         if not self.updating:
             self.update_thread = Thread(target=self.update_cache_helper)
             self.update_thread.start()

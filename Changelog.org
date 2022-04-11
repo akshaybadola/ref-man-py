@@ -1,0 +1,9 @@
+* ChangeLog for ~ref-man-py~
+
+
+** [2022-04-11 Mon 08:42]
+   - Fixed some bugs in cache
+   - Added/Improved some docs
+   - Configured pytest
+   - Fixed requirements.txt
+   - Added dev-dependencies to pyproject.toml

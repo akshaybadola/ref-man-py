@@ -1,6 +1,8 @@
+import sys
+sys.path.append('.')
 import pytest
 from pathlib import Path
-from ref_man.semantic_scholar import FilesCache
+from ref_man_py.semantic_scholar import FilesCache
 
 
 @pytest.fixture

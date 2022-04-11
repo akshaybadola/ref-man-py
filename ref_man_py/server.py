@@ -108,7 +108,8 @@ class Server:
         self.update_cache_run = None
         if local_pdfs_dir and remote_pdfs_dir and remote_links_cache:
             self.pdf_cache_helper: Optional[CacheHelper] =\
-                CacheHelper(local_pdfs_dir, Path(remote_pdfs_dir), remote_links_cache, self.logger)
+                CacheHelper(local_pdfs_dir, Path(remote_pdfs_dir),
+                            Path(remote_links_cache), self.logger)
         else:
             self.pdf_cache_helper = None
             self.logger.warn("All arguments required for pdf cache not given.\n" +

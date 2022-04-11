@@ -1,6 +1,7 @@
-PyYAML>=5.4.0
-Flask>=1.1.1
+PyYAML>=5.4.1
+Flask>=1.1.2
 requests>=2.24.0
+lxml>=4.6.4
 beautifulsoup4>=4.9.1
 psutil>=5.8.0
 common-pyutil>=0.8.0
