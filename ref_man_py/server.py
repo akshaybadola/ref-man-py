@@ -1,12 +1,16 @@
-from typing import List, Dict, Optional, Tuple
+from typing import List, Dict, Optional, Tuple, Union
 import json
 import operator
 import os
 import re
+import time
 from pathlib import Path
+from threading import Thread
+from multiprocessing import Process
 
 import yaml
 import requests
+import psutil
 from flask import Flask, request, Response
 from werkzeug import serving
 
@@ -19,11 +23,12 @@ from .const import default_headers
 from .util import fetch_url_info, fetch_url_info_parallel, parallel_fetch, post_json_wrapper
 from .arxiv import arxiv_get, arxiv_fetch, arxiv_helper
 from .dblp import dblp_helper
-from .semantic_scholar import (SemanticSearch, FilesCache)
+from .semantic_scholar import SemanticScholar, SemanticSearch, FilesCache
 from .cache import CacheHelper
 
 
 app = Flask(__name__)
+print(__name__)
 
 
 class Server:
@@ -102,9 +107,9 @@ class Server:
                 self.logger.error(f"Could not load file {cvf}")
         self.logger.debug(f"Loaded conference files {self.soups.keys()}")
 
-        self.ss_cache = FilesCache(self.data_dir)
-        self.ss_cache.load()
-        # self.ss_cache = load_ss_cache(self.data_dir)
+        # self.ss_cache = FilesCache(self.data_dir)
+        # self.ss_cache.load()
+        self.s2 = SemanticScholar(cache_dir=self.data_dir)
         self.update_cache_run = None
         if local_pdfs_dir and remote_pdfs_dir and remote_links_cache:
             self.pdf_cache_helper: Optional[CacheHelper] =\
@@ -205,8 +210,8 @@ class Server:
                                            self.batch_size, "Arxiv", self.logger)
                 return json.dumps(result)
 
-        @app.route("/semantic_scholar", methods=["GET", "POST"])
-        def ss():
+        @app.route("/s2_paper", methods=["GET", "POST"])
+        def s2_paper():
             if request.method == "GET":
                 if "id" in request.args:
                     id = request.args["id"]
@@ -220,8 +225,92 @@ class Server:
                     force = True
                 else:
                     force = False
-                data = self.ss_cache.get(id_type, id, force)
-                return data
+                data = self.s2.get_details_for_id(id_type, id, force)
+                return json.dumps(data)
+            else:
+                return json.dumps("METHOD NOT IMPLEMENTED")
+
+        @app.route("/s2_details/<ssid>", methods=["GET", "POST"])
+        def s2_details(ssid: str) -> Union[str, bytes]:
+            if request.method == "GET":
+                return json.dumps(self.s2.details(ssid))
+            else:
+                return json.dumps("METHOD NOT IMPLEMENTED")
+
+        @app.route("/s2_all_details/<ssid>", methods=["GET", "POST"])
+        def s2_all_details(ssid: str) -> Union[str, bytes]:
+            if request.method == "GET":
+                return json.dumps(self.s2.get_all_details(ssid))
+            else:
+                return json.dumps("METHOD NOT IMPLEMENTED")
+
+        def s2_citations_references_subr(request, ssid: str, key) -> Union[str, bytes]:
+            if "count" in request.args:
+                count = int(request.args["count"])
+                if count > 10000:
+                    return json.dumps("MAX 10000 CITATIONS CAN BE FETCHED AT ONCE.")
+            else:
+                count = 0
+            if request.method == "GET":
+                if "filters" in request.args:
+                    return json.dumps("FILTERS NOT SUPPORTED WITH GET")
+                count = count or 10000
+                values = self.s2.details(ssid)[key]  # type: ignore
+                values = [x for i, x in enumerate(values) if i < count]
+                return json.dumps(values)
+            else:
+                data = request.json
+                if not data or (data and "filters" not in data):
+                    return json.dumps("METHOD NOT IMPLEMENTED IF filters NOT GIVEN")
+                else:
+                    filters = data["filters"]
+                    func = self.s2.filter_citations if key == "citations" else\
+                        self.s2.filter_references
+                    return json.dumps(func(ssid, filters, count))
+
+        @app.route("/s2_citations/<ssid>", methods=["GET", "POST"])
+        def s2_citations(ssid: str) -> Union[str, bytes]:
+            return s2_citations_references_subr(request, ssid, "citations")
+
+        @app.route("/s2_references/<ssid>", methods=["GET", "POST"])
+        def s2_references(ssid: str) -> Union[str, bytes]:
+            return s2_citations_references_subr(request, ssid, "references")
+
+        @app.route("/s2_next_citations/<ssid>", methods=["GET", "POST"])
+        def s2_next_citations(ssid: str) -> Union[str, bytes]:
+            if request.method == "GET":
+                if "filters" in request.args:
+                    return json.dumps("FILTERS NOT SUPPORTED WITH GET")
+                if "count" in request.args:
+                    count = int(request.args["count"])
+                    if count > 10000:
+                        json.dumps("MAX 10000 CITATIONS CAN BE FETCHED AT ONCE.")
+                else:
+                    count = 0
+                return json.dumps(self.s2.next_citations(ssid, count))
+            else:
+                return json.dumps("METHOD NOT IMPLEMENTED")
+
+        @app.route("/s2_citations_params", methods=["GET", "POST"])
+        def s2_citations_params():
+            def json_defaults(x):
+                return str(x).replace("typing.", "").replace("<class \'", "").replace("\'>", "")
+            filters = [(k, v.__annotations__) for k, v in self.s2.filters.items()],
+            if request.method == "GET":
+                return json.dumps({"count": "Number of citations to return",
+                                   "filters": filters},
+                                  default=json_defaults)
+            else:
+                return json.dumps("METHOD NOT IMPLEMENTED")
+
+        @app.route("/s2_search", methods=["GET", "POST"])
+        def s2_search():
+            if request.method == "GET":
+                if "q" in request.args:
+                    query = request.args["q"]
+                else:
+                    return json.dumps("NO QUERY GIVEN")
+                return self.s2.search(query)
             else:
                 return json.dumps("METHOD NOT IMPLEMENTED")
 
@@ -447,9 +536,24 @@ class Server:
                 self.logd("Shutting down cache helper.")
                 self.pdf_cache_helper.shutdown()
             func = request.environ.get('werkzeug.server.shutdown')
-            func()
+            print(f"PROC {self.proc._popen}")
+            if func:
+                func()
+            elif hasattr(self, "proc"):
+                self.logd("werkzeug.server.shutdown not available")
+                self.logd("Trying psutil terminate")
+                t = Thread(target=_shutdown)
+                t.start()
             return self.logi("Shutting down")
+
+        def _shutdown():
+            time.sleep(.1)
+            p = psutil.Process(self.proc.pid)
+            p.terminate()
 
     def run(self):
         "Run the server"
-        serving.run_simple(self.host, self.port, app, threaded=self.threaded)
+        self.proc = Process(target=serving.run_simple,
+                            args=(self.host, self.port, app),
+                            kwargs={"threaded": self.threaded})
+        self.proc.start()

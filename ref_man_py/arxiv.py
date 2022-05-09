@@ -49,8 +49,8 @@ def arxiv_get(arxiv_id: str) -> str:
         arxiv_id: The Arxiv ID of the article
 
     """
-    response = requests.get("http://export.arxiv.org/api/query?id_list={arxiv_id}")
-    soup = BeautifulSoup(response.content, features="lxml")
+    response = requests.get(f"http://export.arxiv.org/api/query?id_list={arxiv_id}")
+    soup = BeautifulSoup(response.content, features="xml")
     entry = soup.find("entry")
     abstract = entry.find("summary").text
     title = entry.find("title").text
@@ -67,7 +67,7 @@ def arxiv_get(arxiv_id: str) -> str:
 
 def _arxiv_success(query: str, response: requests.Response,
                    content: Dict[str, str]) -> None:
-    soup = BeautifulSoup(response.content, features="lxml")
+    soup = BeautifulSoup(response.content, features="xml")
     entry = soup.find("entry")
     abstract = entry.find("summary").text
     title = entry.find("title").text

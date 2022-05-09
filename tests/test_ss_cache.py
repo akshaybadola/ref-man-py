@@ -31,11 +31,10 @@ def test_cache_load_with_dups(cache):
 
 def test_cache_get_existing(cache):
     cache.load()
-    files = [x for x in os.listdir(cache._root) if x != "metadata"]
+    files = [x for x in os.listdir(cache._root) if "metadata" not in x]
     fl = random.choice(files)
     data = cache.get("ss", fl, False)
     assert isinstance(data, bytes)
-    assert len(data) > 0
     assert len(data) > 0
     val = json.loads(data)
     assert isinstance(val, dict)
