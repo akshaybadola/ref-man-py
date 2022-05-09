@@ -7,3 +7,10 @@
    - Configured pytest
    - Fixed requirements.txt
    - Added dev-dependencies to pyproject.toml
+
+** [2022-05-10 Tue 04:41]
+   - Added Semantic Scholar Graph API
+   - Added Routes ~s2_paper~, ~s2_citations~, ~s2_references~, ~s2_next_citations~,
+     ~s2_citations_params~, ~s2_search~, ~s2_details~ and ~s2_all_details~.
+   - Added tests for S2 API and the routes.
+   - Fixed an issue with arxiv get
