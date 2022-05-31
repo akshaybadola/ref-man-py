@@ -216,8 +216,10 @@ class SemanticScholar:
         """
         details = data["details"]
         paper_id = details["paperId"]
-        with open(os.path.join(self._cache_dir, str(paper_id)), "w") as f:
+        fname = os.path.join(self._cache_dir, str(paper_id))
+        with open(fname, "w") as f:
             json.dump(data, f)
+        print(f"Wrote file {fname}")
         other_ids = [details["externalIds"].get(k, "") for k in self._id_keys]  # type: ignore
         for ind, key in enumerate(self._id_keys):
             if other_ids[ind]:
@@ -357,19 +359,20 @@ class SemanticScholar:
             force: Force fetch from Semantic Scholar server if True, ignoring cache
 
         """
-        if have_metadata:     # fetch_from_disk implies ID is SSID
+        if have_metadata:
             print(f"Checking for cached data for {ID}")
             data = self._check_cache(ID)
-            if data is not None:
-                return data if no_transform else self.transform(data)
+            if not force:
+                if data is not None:
+                    return data if no_transform else self.transform(data)
+                else:
+                    print(f"Details for {ID} not present on disk. Will fetch.")
+                    return self.store_details_and_get(ID, no_transform)
             else:
-                print(f"Details for {ID} not present on disk. Will fetch.")
+                print(f"Force fetching from Semantic Scholar for {ID}")
                 return self.store_details_and_get(ID, no_transform)
         else:
-            if force:
-                print(f"Forced Fetching for {ID}")
-            else:
-                print(f"Data not in cache for {ID}. Fetching")
+            print(f"Fetching from Semantic Scholar for {ID}")
             return self.store_details_and_get(ID, no_transform)
 
     def get_details_for_id(self, id_type: str, ID: str, force: bool) -> Union[str, Dict]:
