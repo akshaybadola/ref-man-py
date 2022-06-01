@@ -23,7 +23,7 @@ from .const import default_headers
 from .util import fetch_url_info, fetch_url_info_parallel, parallel_fetch, post_json_wrapper
 from .arxiv import arxiv_get, arxiv_fetch, arxiv_helper
 from .dblp import dblp_helper
-from .semantic_scholar import SemanticScholar, SemanticSearch, FilesCache
+from .semantic_scholar import SemanticScholar, SemanticSearch
 from .cache import CacheHelper
 
 
@@ -63,6 +63,9 @@ class Server:
     :code:`local_pdfs_dir` is synced to that with :code:`rclone`.
 
     """
+    # TODO: Generate default config and place in config dir.
+    #       Also allow the user to add config options like request headers,
+    #       proxy ports, data_dir etc.
     def __init__(self, host: str, port: int, proxy_port: int, proxy_everything: bool,
                  proxy_everything_port: int, data_dir: Path, local_pdfs_dir: Path,
                  remote_pdfs_dir: str, remote_links_cache: Path, batch_size: int,
@@ -76,6 +79,8 @@ class Server:
         self.proxy_everything_port = proxy_everything_port
         self.chrome_debugger_path = Path(chrome_debugger_path) if chrome_debugger_path else None
         self.config_dir = Path.home().joinpath(".config", "ref-man")
+        if not self.config_dir.exists():
+            os.makedirs(self.config_dir)
         self.verbosity = verbosity
         self.threaded = threaded
         # We set "error" to warning
@@ -89,8 +94,6 @@ class Server:
             self.logger = get_stream_logger("ref_man_logger", log_level=self.verbosity)
             self.logger.debug(f"Log level is set to {self.verbosity}.")
         # NOTE: This soup stuff should be separate buffer
-        if not self.config_dir.exists():
-            os.makedirs(self.config_dir)
         self.cvf_files = [os.path.join(self.config_dir, f)
                           for f in os.listdir(self.config_dir)
                           if re.match(r'^(cvpr|iccv)', f.lower())]

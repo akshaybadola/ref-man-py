@@ -17,3 +17,7 @@
 
 ** [2022-05-31 Tue 17:18]
    - Fixed bug where force updated cache from Semantic Scholar was not working.
+
+** [2022-06-01 Wed 09:55]
+   - Added fetching author details and papers
+   - There are bugs with some tests failing but will fix later

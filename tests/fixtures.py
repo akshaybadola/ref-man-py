@@ -8,7 +8,7 @@ sys.path.append('.')
 import requests
 import pytest
 
-from ref_man_py.semantic_scholar import FilesCache
+from ref_man_py.files_cache import FilesCache
 from ref_man_py.semantic_scholar import SemanticScholar
 from ref_man_py.server import Server
 
