@@ -116,7 +116,7 @@ def test_s2_details_fetches_correct_format_both_on_and_not_on_disk(s2, cache_fil
 
 def test_s2_graph_search(s2):
     result = json.loads(s2.search("breiman random forests"))
-    assert "error" not in result
+    assert isinstance(result, dict)
     assert result["data"][0]["paperId"] == "13d4c2f76a7c1a4d0a71204e1d5d263a3f5a7986"
 
 
