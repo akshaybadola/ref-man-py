@@ -98,6 +98,7 @@ class Server:
                           for f in os.listdir(self.config_dir)
                           if re.match(r'^(cvpr|iccv)', f.lower())]
         self.soups = {}
+        self.cvf_url_root = "https://openaccess.thecvf.com/"
         self.logger.debug(f"Loading CVF soups.")
         for cvf in self.cvf_files:
             match = re.match(r'^(cvpr|iccv)(.*?)([0-9]+)',
@@ -128,13 +129,29 @@ class Server:
         self.init_routes()
 
     def download_cvf_page_and_update_soups(self, venue, year):
-        url = f"https://openaccess.thecvf.com/{venue.upper()}{year}"
+        url = f"{self.cvf_url_root}/{venue.upper()}{year}"
         resp = requests.get(url)
+        soup = BeautifulSoup(resp.content, features="lxml")
+        links = soup.find_all("a")
+        regexp = f"{venue.upper()}{year}.py"
+        if re.match(regexp + ".+", links[-1].attrs['href']):
+            day_links = [*filter(lambda x: re.match(r"Day [0-9]+?: ([0-9-+])", x.text),
+                                 soup.find_all("a"))]
+            content = []
+            for i, dl in enumerate(day_links):
+                day = re.match(r"Day [0-9]+?: ([0-9-]+)", dl.text).groups()[0]
+                d_url = f"{self.cvf_url_root}/{venue.upper()}{year}.py?day={day}"
+                resp = requests.get(d_url)
+                content.append(resp.content)
+                self.logd(f"Fetched page {i+1} for {venue.upper()}{year} and {day}")
+            content = "\n".join([x.decode() for x in content])
+        else:
+            self.logd(f"Fetched page for {venue.upper()}{year}")
+            content = resp.content.decode()
         fname = self.config_dir.joinpath(f"{venue.upper()}{year}")
         if resp.status_code == 200:
             with open(fname, "w") as f:
                 f.write(resp.content.decode())
-        self.logd(f"Fetched page for {venue.upper()}{year}")
         with open(fname) as f:
             self.soups[(venue.lower(), year)] = BeautifulSoup(f.read(), features="lxml")
 
@@ -480,7 +497,7 @@ class Server:
             else:
                 soup_keys = [(v, y) for v, y in self.soups.keys() if v == venue]
             if not soup_keys and year:
-                self.logd(f"Fetching page for {venue.upper()}{year}")
+                self.logd(f"Fetching page(s) for {venue.upper()}{year}")
                 self.download_cvf_page_and_update_soups(venue, year)
                 soup_keys = [(v, y) for v, y in self.soups.keys() if v == venue and y == year]
             soups = []
