@@ -20,7 +20,8 @@ from common_pyutil.log import get_stream_logger
 
 from . import __version__
 from .const import default_headers
-from .util import fetch_url_info, fetch_url_info_parallel, parallel_fetch, post_json_wrapper
+from .util import (fetch_url_info, fetch_url_info_parallel, parallel_fetch,
+                   post_json_wrapper, check_proxy_port)
 from .arxiv import arxiv_get, arxiv_fetch, arxiv_helper
 from .dblp import dblp_helper
 from .semantic_scholar import SemanticScholar, SemanticSearch
@@ -74,6 +75,9 @@ class Server:
         self.port = port
         self.batch_size = batch_size
         self.data_dir = Path(data_dir)
+        self.local_pdfs_dir = local_pdfs_dir
+        self.remote_pdfs_dir = remote_pdfs_dir
+        self.remote_links_cache = remote_links_cache
         self.proxy_port = proxy_port
         self.proxy_everything = proxy_everything
         self.proxy_everything_port = proxy_everything_port
@@ -83,6 +87,37 @@ class Server:
             os.makedirs(self.config_dir)
         self.verbosity = verbosity
         self.threaded = threaded
+
+        self.set_verbosity()
+        self.load_cvf_files()
+        self.s2 = SemanticScholar(cache_dir=self.data_dir)
+        self.init_remote_cache()
+
+        # NOTE: Checks only once for the proxy, see util.check_proxy
+        #       for a persistent solution
+        self.check_proxies()
+        # NOTE: Although this is still use here, SS may phase it out
+        #       in favour of the graph/search
+        self.semantic_search = SemanticSearch(self.chrome_debugger_path)
+        self.init_routes()
+
+    def init_remote_cache(self):
+        """Initialize cache (and map) of remote and local pdf files.
+
+        The files can be synced from and to an :code:`rclone` remote.
+
+        """
+        self.update_cache_run = None
+        if self.local_pdfs_dir and self.remote_pdfs_dir and self.remote_links_cache:
+            self.pdf_cache_helper: Optional[CacheHelper] =\
+                CacheHelper(self.local_pdfs_dir, Path(self.remote_pdfs_dir),
+                            Path(self.remote_links_cache), self.logger)
+        else:
+            self.pdf_cache_helper = None
+            self.logger.warn("All arguments required for pdf cache not given.\n" +
+                             "Will not maintain remote pdf links cache.")
+
+    def set_verbosity(self):
         # We set "error" to warning
         verbosity_levels = {"info", "error", "debug"}
         if self.verbosity not in verbosity_levels:
@@ -93,7 +128,14 @@ class Server:
         else:
             self.logger = get_stream_logger("ref_man_logger", log_level=self.verbosity)
             self.logger.debug(f"Log level is set to {self.verbosity}.")
-        # NOTE: This soup stuff should be separate buffer
+
+    def load_cvf_files(self):
+        """Load the CVF Soups from HTML files.
+
+        XML parses via :class:`BeautifulSoup` are maintained for easy
+        fetching of an article in case it's availble.
+
+        """
         self.cvf_files = [os.path.join(self.config_dir, f)
                           for f in os.listdir(self.config_dir)
                           if re.match(r'^(cvpr|iccv)', f.lower())]
@@ -110,23 +152,6 @@ class Server:
             else:
                 self.logger.error(f"Could not load file {cvf}")
         self.logger.debug(f"Loaded conference files {self.soups.keys()}")
-
-        # self.ss_cache = FilesCache(self.data_dir)
-        # self.ss_cache.load()
-        self.s2 = SemanticScholar(cache_dir=self.data_dir)
-        self.update_cache_run = None
-        if local_pdfs_dir and remote_pdfs_dir and remote_links_cache:
-            self.pdf_cache_helper: Optional[CacheHelper] =\
-                CacheHelper(local_pdfs_dir, Path(remote_pdfs_dir),
-                            Path(remote_links_cache), self.logger)
-        else:
-            self.pdf_cache_helper = None
-            self.logger.warn("All arguments required for pdf cache not given.\n" +
-                             "Will not maintain remote pdf links cache.")
-        # NOTE: Checks only once for the proxy, see util.check_proxy for a persistent solution
-        self.check_proxies()
-        self.semantic_search = SemanticSearch(self.chrome_debugger_path)
-        self.init_routes()
 
     def download_cvf_page_and_update_soups(self, venue, year):
         url = f"{self.cvf_url_root}/{venue.upper()}{year}"
@@ -171,37 +196,21 @@ class Server:
         self.logger.error(msg)
         return msg
 
-    def check_proxies_subr(self, proxy_port: int, proxy_name: str) ->\
-            Tuple[bool, str, Dict[str, str]]:
-        status = False
-        proxies = {"http": f"http://127.0.0.1:{proxy_port}",
-                   "https": f"http://127.0.0.1:{proxy_port}"}
-        try:
-            response = requests.get("http://google.com", proxies=proxies,
-                                    timeout=1)
-            if response.status_code == 200:
-                msg = f"{proxy_name} seems to work"
-                self.logger.info(msg)
-                status = True
-            else:
-                msg = f"{proxy_name} seems reachable but wrong" +\
-                    f" status_code {response.status_code}"
-                self.logger.info(msg)
-        except requests.exceptions.Timeout:
-            msg = f"Timeout: Proxy for {proxy_name} not reachable"
-            self.logger.error(msg)
-        except requests.exceptions.ProxyError:
-            msg = f"ProxyError: Proxy for {proxy_name} not reachable. Will not proxy"
-            self.logger.error(msg)
-        return status, msg, proxies
-
     def check_proxies(self) -> str:
+        """Check any proxies if given.
+
+        Proxies may help bypass paywalls if they connect to your institute
+        which has access to certain articles. You'll need to have a valid
+        proxy server that connects to the network of your institute.
+
+        """
         msgs: List[str] = []
         self.proxies = None
         self.everything_proxies = None
         if self.proxy_everything_port:
-            status, msg, proxies = self.check_proxies_subr(self.proxy_everything_port,
-                                                           "proxy everything")
+            status, msg, proxies = check_proxy_port(self.proxy_everything_port,
+                                                    "proxy everything",
+                                                    self.logger)
             msgs.append(msg)
             if status:
                 msg = "Warning: proxy_everything is only implemented for DBLP."
@@ -210,7 +219,9 @@ class Server:
                 self.everything_proxies = proxies
         if self.proxy_port is not None:
             proxy_name = f"Proxy with port: {self.proxy_port}"
-            status, msg, proxies = self.check_proxies_subr(self.proxy_port, proxy_name)
+            status, msg, proxies = check_proxy_port(self.proxy_port,
+                                                    proxy_name,
+                                                    self.logger)
             msgs.append(msg)
             if status:
                 self.proxies = proxies
@@ -259,12 +270,24 @@ class Server:
 
         @app.route("/s2_all_details/<ssid>", methods=["GET", "POST"])
         def s2_all_details(ssid: str) -> Union[str, bytes]:
+            """Get paper, metadata, references and citations for SSID."""
             if request.method == "GET":
                 return json.dumps(self.s2.get_all_details(ssid))
             else:
                 return json.dumps("METHOD NOT IMPLEMENTED")
 
         def s2_citations_references_subr(request, ssid: str, key) -> Union[str, bytes]:
+            """Get requested citations or references for a paper.
+
+            TODO: describe the filters and count mechanism
+
+            Requires an :code:`ssid` for the paper. Optional :code:`count` and
+            :code:`filters` can be given in the request as arguments.
+
+            See :meth:`s2_citations_references_subr` for details
+
+            """
+
             if "count" in request.args:
                 count = int(request.args["count"])
                 if count > 10000:
@@ -290,14 +313,34 @@ class Server:
 
         @app.route("/s2_citations/<ssid>", methods=["GET", "POST"])
         def s2_citations(ssid: str) -> Union[str, bytes]:
+            """Get the citations for a paper from S2 graph api.
+
+            Requires an :code:`ssid` for the paper. Optional :code:`count` and
+            :code:`filters` can be given in the request as arguments.
+
+            See :meth:`s2_citations_references_subr` for details
+
+            """
             return s2_citations_references_subr(request, ssid, "citations")
 
         @app.route("/s2_references/<ssid>", methods=["GET", "POST"])
         def s2_references(ssid: str) -> Union[str, bytes]:
+            """Get the references for a paper from S2 graph api.
+
+            Requires an :code:`ssid` for the paper. Optional :code:`count` and
+            :code:`filters` can be given in the request as arguments.
+
+            See :meth:`s2_citations_references_subr` for details
+
+            """
             return s2_citations_references_subr(request, ssid, "references")
 
         @app.route("/s2_next_citations/<ssid>", methods=["GET", "POST"])
         def s2_next_citations(ssid: str) -> Union[str, bytes]:
+            """Get the next citations from S2 graph api.
+
+            See :meth:`SemanticScholar.next_citations` for implementation details.
+            """
             if request.method == "GET":
                 if "filters" in request.args:
                     return json.dumps("FILTERS NOT SUPPORTED WITH GET")
@@ -309,10 +352,15 @@ class Server:
                     count = 0
                 return json.dumps(self.s2.next_citations(ssid, count))
             else:
+                # TODO: Not Implemented yet
                 return json.dumps("METHOD NOT IMPLEMENTED")
 
         @app.route("/s2_citations_params", methods=["GET", "POST"])
         def s2_citations_params():
+            """Get or set parameters for fetching citations from S2.
+
+            The parameters can be queried or set dynamically.
+            """
             def json_defaults(x):
                 return str(x).replace("typing.", "").replace("<class \'", "").replace("\'>", "")
             filters = [(k, v.__annotations__) for k, v in self.s2.filters.items()],
@@ -321,10 +369,12 @@ class Server:
                                    "filters": filters},
                                   default=json_defaults)
             else:
+                # TODO: Not Implemented yet
                 return json.dumps("METHOD NOT IMPLEMENTED")
 
         @app.route("/s2_search", methods=["GET", "POST"])
         def s2_search():
+            """Search Semantic Scholar for a query string via the graph api."""
             if request.method == "GET":
                 if "q" in request.args:
                     query = request.args["q"]
@@ -336,6 +386,9 @@ class Server:
 
         @app.route("/semantic_scholar_search", methods=["GET", "POST"])
         def ss_search():
+            """Search Semantic Scholar for a query string.
+
+            This is different than graph api requests."""
             if "q" in request.args and request.args["q"]:
                 query = request.args["q"]
             else:
@@ -351,7 +404,10 @@ class Server:
 
         @app.route("/url_info", methods=["GET"])
         def url_info() -> str:
-            """Fetch info about a given url or urls based on certain rules."""
+            """Fetch info about a given url or urls based on certain rules.
+
+            See :func:`fetch_url_info` for details.
+            """
             if "url" in request.args and request.args["url"]:
                 url = request.args["url"]
                 urls = None
@@ -523,13 +579,15 @@ class Server:
 
         @app.route("/echo", methods=["GET"])
         def echo():
+            """Return a string representationn of request args or echo."""
             if request.args:
                 return "\n".join(k + " : " + v for k, v in request.args.items())
             else:
-                return "Echo!"
+                return "echo"
 
         @app.route("/version", methods=["GET"])
         def version():
+            "Return version"
             return f"ref-man python server {__version__}"
 
         # TODO: rest of helpers should also support proxy

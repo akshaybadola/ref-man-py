@@ -1,4 +1,4 @@
-from typing import List, Dict, Callable, Optional
+from typing import List, Dict, Callable, Optional, Tuple
 from threading import Thread, Event
 from queue import Queue
 import json
@@ -12,6 +12,32 @@ import flask
 
 from .const import default_headers
 from .q_helper import ContentType
+
+
+def check_proxy_port(proxy_port: int, proxy_name: str,
+                       logger: logging.Logger) ->\
+        Tuple[bool, str, Dict[str, str]]:
+    status = False
+    proxies = {"http": f"http://127.0.0.1:{proxy_port}",
+               "https": f"http://127.0.0.1:{proxy_port}"}
+    try:
+        response = requests.get("http://google.com", proxies=proxies,
+                                timeout=1)
+        if response.status_code == 200:
+            msg = f"{proxy_name} seems to work"
+            logger.info(msg)
+            status = True
+        else:
+            msg = f"{proxy_name} seems reachable but wrong" +\
+                f" status_code {response.status_code}"
+            logger.info(msg)
+    except requests.exceptions.Timeout:
+        msg = f"Timeout: Proxy for {proxy_name} not reachable"
+        logger.error(msg)
+    except requests.exceptions.ProxyError:
+        msg = f"ProxyError: Proxy for {proxy_name} not reachable. Will not proxy"
+        logger.error(msg)
+    return status, msg, proxies
 
 
 def check_proxy(proxies: Dict[str, str], flag: Event):
@@ -62,7 +88,7 @@ def parallel_fetch(urls: List[str], fetch_func: Callable[[str, Queue], None],
 def fetch_url_info(url: str) -> Dict[str, str]:
     response = requests.get(url, headers=default_headers)
     if response.status_code == 200:
-        soup = BeautifulSoup(response.content)
+        soup = BeautifulSoup(response.content, features="lxml")
         title = soup.find("title").text
         if re.match("https{0,1}://arxiv.org.*", url):
             title = soup.find(None, attrs={"class": "title"}).text.split(":")[1]

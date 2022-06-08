@@ -448,7 +448,30 @@ class SemanticScholar:
         return self.fetch_from_cache_or_service(have_metadata, ssid or ids[id_type],
                                                 force, False)
 
+    # CHECK: Is this function here just because I have references and citations?
+    #        For consistency?
+    def details(self, ID: str, force: bool = False) -> Union[str, Dict]:
+        """Get details for paper with SSID :code:`ID`
+
+        Args:
+            ID: SSID of the paper
+            force: Whether to force fetch from service
+
+        """
+        return self.get_details_for_id("ss", ID, force)
+
+    # TODO: Do I need two details functions?
+    #       See details above
     def get_all_details(self, ID: str):
+        """Get details for paper with SSID :code:`ID`
+
+        Args:
+            ID: SSID of the paper
+
+        Difference between this and :meth:`details` is that this one calls
+        :meth:`fetch_from_cache_or_service` directly.
+
+        """
         ssid = ID
         have_metadata = ssid in self._rev_cache
         return self.fetch_from_cache_or_service(have_metadata, ssid, False, True)
@@ -509,9 +532,6 @@ class SemanticScholar:
             return self._in_memory[ID]
         else:
             return None
-
-    def details(self, ID: str, force: bool = False) -> Union[str, Dict]:
-        return self.get_details_for_id("ss", ID, force)
 
     def _citations(self, ID: str, num: int = 0):
         """Get all citations for a paperId :code:`ID` from Semantic Scholar Graph API
@@ -626,7 +646,7 @@ class SemanticScholar:
         terms = "+".join(query.split(" "))
         fields = ",".join(self._config["search"]["fields"])
         limit = self._config["search"]["limit"]
-        url = f"{self._root_url}/search?query={terms}&fields={fields}&limit={limit}"
+        url = f"{self._root_url}/paper/search?query={terms}&fields={fields}&limit={limit}"
         response = self._get(url)
         if response.status_code == 200:
             return response.content

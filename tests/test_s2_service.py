@@ -8,26 +8,6 @@ import requests
 from ref_man_py.semantic_scholar import SemanticScholar
 
 
-def test_server_version(server):
-    url = f"http://{server.host}:{server.port}"
-    response = requests.get(f"{url}/version")
-    assert response.status_code == 200
-
-
-def test_server_get_yaml(server):
-    url = f"http://{server.host}:{server.port}"
-    response = requests.post(f"{url}/get_yaml", json={"key": "value"})
-    assert response.status_code == 200
-    assert yaml.load(response.content, Loader=yaml.FullLoader)
-
-
-def test_server_get_arxiv(server):
-    url = f"http://{server.host}:{server.port}"
-    response = requests.get(f"{url}/arxiv?id=2010.06775")
-    assert response.status_code == 200
-    assert json.loads(response.content).startswith("@")
-
-
 # TODO: Different types of ids fetching
 def test_server_get_s2_paper_arxiv(server):
     url = f"http://{server.host}:{server.port}"
