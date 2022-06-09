@@ -35,8 +35,11 @@ def test_service_dblp(server):
     pass
 
 
-def test_service_get_cvf_url(server):
-    pass
+def test_service_download_cvf_pages_and_get_cvf_url(server):
+    url = f"http://{server.host}:{server.port}"
+    title = "Robust Classification with Convolutional Prototype Learning"
+    response = requests.get(f"{url}/get_cvf_url?title={title}&venue=CVPR&year=2018")
+    assert response.content.decode().endswith("pdf")
 
 
 def test_service_get_update_cache(server):

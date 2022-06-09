@@ -68,6 +68,7 @@ def server():
               "local_pdfs_dir": None,
               "remote_pdfs_dir": None,
               "remote_links_cache": None,
+              "config_dir": Path(__file__).parent.joinpath("config"),
               "batch_size": 16,
               "chrome_debugger_path": None,
               "verbosity": "debug",

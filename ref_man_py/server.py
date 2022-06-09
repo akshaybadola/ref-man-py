@@ -29,7 +29,6 @@ from .cache import CacheHelper
 
 
 app = Flask(__name__)
-print(__name__)
 
 
 class Server:
@@ -50,6 +49,7 @@ class Server:
         local_pdfs_dir: Local directory where the pdf files are stored.
         remote_pdfs_dir: Remote directory where the pdf files are stored.
         remote_links_cache: File mapping local pdfs to remote links.
+        config_dir: Directory to store configuration related files
         batch_size: Number of parallel requests to send in case parallel requests is
                     implemented for that method.
         chrome_debugger_path: Path for the chrome debugger script.
@@ -69,7 +69,8 @@ class Server:
     #       proxy ports, data_dir etc.
     def __init__(self, host: str, port: int, proxy_port: int, proxy_everything: bool,
                  proxy_everything_port: int, data_dir: Path, local_pdfs_dir: Path,
-                 remote_pdfs_dir: str, remote_links_cache: Path, batch_size: int,
+                 remote_pdfs_dir: str, remote_links_cache: Path,
+                 config_dir: Path, batch_size: int,
                  chrome_debugger_path: str, verbosity: str, threaded: bool):
         self.host = "127.0.0.1"
         self.port = port
@@ -82,7 +83,7 @@ class Server:
         self.proxy_everything = proxy_everything
         self.proxy_everything_port = proxy_everything_port
         self.chrome_debugger_path = Path(chrome_debugger_path) if chrome_debugger_path else None
-        self.config_dir = Path.home().joinpath(".config", "ref-man")
+        self.config_dir = config_dir
         if not self.config_dir.exists():
             os.makedirs(self.config_dir)
         self.verbosity = verbosity
@@ -114,8 +115,8 @@ class Server:
                             Path(self.remote_links_cache), self.logger)
         else:
             self.pdf_cache_helper = None
-            self.logger.warn("All arguments required for pdf cache not given.\n" +
-                             "Will not maintain remote pdf links cache.")
+            self.logger.warning("All arguments required for pdf cache not given.\n" +
+                                "Will not maintain remote pdf links cache.")
 
     def set_verbosity(self):
         # We set "error" to warning
@@ -176,7 +177,7 @@ class Server:
         fname = self.config_dir.joinpath(f"{venue.upper()}{year}")
         if resp.status_code == 200:
             with open(fname, "w") as f:
-                f.write(resp.content.decode())
+                f.write(content)
         with open(fname) as f:
             self.soups[(venue.lower(), year)] = BeautifulSoup(f.read(), features="lxml")
 
@@ -189,7 +190,7 @@ class Server:
         return msg
 
     def logw(self, msg: str) -> str:
-        self.logger.warn(msg)
+        self.logger.warning(msg)
         return msg
 
     def loge(self, msg: str) -> str:
@@ -456,7 +457,7 @@ class Server:
                     self.proxies = None
                     response = requests.get(url, headers=default_headers)
             else:
-                self.logger.warn("Proxy dead. Fetching without proxy")
+                self.logger.warning("Proxy dead. Fetching without proxy")
                 response = requests.get(url, headers=default_headers)
             if url.startswith("http:") or response.url.startswith("https:"):
                 return Response(response.content)
