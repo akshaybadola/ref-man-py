@@ -4,7 +4,8 @@ import json
 from ref_man_py import server
 
 
-def test_service_load_config():
+def test_service_load_config(server):
+    # pytest.set_trace()
     # config_file = file_path
     # service = server.Server()
     # Or should it be that config is separate from the service?

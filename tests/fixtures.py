@@ -57,8 +57,10 @@ def cache_files():
     return [x for x in os.listdir(cache_dir) if "metadata" not in x]
 
 
-@pytest.fixture(scope="module")
+@pytest.fixture(scope="session")
 def server():
+    shutil.copy("tests/cache_data/metadata.bak",
+                "tests/cache_data/metadata")
     kwargs = {"host": "localhost",
               "port": 9998,
               "proxy_port": None,

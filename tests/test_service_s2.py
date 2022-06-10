@@ -63,7 +63,8 @@ def test_server_get_s2_citations_without_filters(server):
     url = f"http://{server.host}:{server.port}"
     key = "13d4c2f76a7c1a4d0a71204e1d5d263a3f5a7986"
     response = requests.post(f"{url}/s2_citations/{key}")
-    assert response.status_code == 400
+    assert response.status_code == 200
+    assert "method not implemented" in json.loads(response.content).lower()
     response = requests.get(f"{url}/s2_citations/{key}")
     assert response.status_code == 200
     data = json.loads(response.content)
