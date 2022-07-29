@@ -76,25 +76,26 @@ class SemanticScholar:
 
         """
         self._config_file = config_file
+        self._config = self.default_config.copy()
         if config_file:
             with open(self._config_file) as f:
-                self._config = json.load(f)
+                config = json.load(f)
         else:
-            self._config = {"search": {},
-                            "details": {},
-                            "references": {},
-                            "citations": {},
-                            "author": {},
-                            "author_papers": {}}
+            config = {}
         for k in self._config:
-            self._config[k].update(self.default_config[k])
+            if k in config:
+                if isinstance(self._config[k], dict):
+                    self._config[k].update(config[k])  # type: ignore
+                else:
+                    self._config[k] = config[k]
 
     @property
     def default_config(self) -> Dict[str, Dict[str, Any]]:
         """Generate a default config in case config file is not on disk.
 
         """
-        return {"search": {"limit": 10,
+        return {"api_key": None,
+                "search": {"limit": 10,
                            "fields": ['authors', 'abstract', 'title',
                                       'venue', 'paperId', 'year',
                                       'url', 'citationCount',
@@ -230,13 +231,15 @@ class SemanticScholar:
         with open(fname, "w") as f:
             json.dump(data, f)
         print(f"Wrote file {fname}")
-        other_ids = [details["externalIds"].get(k, "") for k in self._id_keys]  # type: ignore
+        ext_ids = {self.id_types(k): v for k, v in details["externalIds"].items()}  # type: ignore
+        other_ids = [ext_ids.get(k, "") for k in self._id_keys]  # type: ignore
         for ind, key in enumerate(self._id_keys):
             if other_ids[ind]:
                 self._cache[key][other_ids[ind]] = paper_id
         existing = self._rev_cache.get(paper_id, None)
         if existing:
-            self._rev_cache[paper_id] = [x or y for x, y in zip(self._rev_cache[paper_id], other_ids)]
+            self._rev_cache[paper_id] = [x or y for x, y in
+                                         zip(self._rev_cache[paper_id], other_ids)]
         else:
             self._rev_cache[paper_id] = other_ids
             self.update_metadata(paper_id)
@@ -444,9 +447,9 @@ class SemanticScholar:
         else:
             itype = self.id_types(id_type)
             ssid = self._cache[itype].get(ID, "")
-            have_metadata = bool(ID)
-        return self.fetch_from_cache_or_service(have_metadata, ssid or ids[id_type],
-                                                force, False)
+            have_metadata = bool(ssid)
+        return self.apply_limits(self.fetch_from_cache_or_service(
+            have_metadata, ssid or ids[id_type], force, False))
 
     # CHECK: Is this function here just because I have references and citations?
     #        For consistency?
@@ -460,21 +463,39 @@ class SemanticScholar:
         """
         return self.get_details_for_id("ss", ID, force)
 
-    # TODO: Do I need two details functions?
-    #       See details above
-    def get_all_details(self, ID: str):
-        """Get details for paper with SSID :code:`ID`
+    def apply_limits(self, data):
+        """Apply count limits to S2 data citations and references
 
         Args:
-            ID: SSID of the paper
+            data: S2 Data
 
-        Difference between this and :meth:`details` is that this one calls
-        :meth:`fetch_from_cache_or_service` directly.
+        Limits are defined in configuration
 
         """
-        ssid = ID
-        have_metadata = ssid in self._rev_cache
-        return self.fetch_from_cache_or_service(have_metadata, ssid, False, True)
+        _data = data.copy()
+        if "citations" in data:
+            limit = self._config["citations"]["limit"]
+            _data["citations"] = _data["citations"][:limit]
+        if "references" in data:
+            limit = self._config["citations"]["limit"]
+            _data["references"] = _data["citations"][:limit]
+        return _data
+
+    # TODO: Do I need two details functions?
+    #       See details above
+    # def get_all_details(self, ID: str):
+    #     """Get details for paper with SSID :code:`ID`
+
+    #     Args:
+    #         ID: SSID of the paper
+
+    #     Difference between this and :meth:`details` is that this one calls
+    #     :meth:`fetch_from_cache_or_service` directly.
+
+    #     """
+    #     ssid = ID
+    #     have_metadata = ssid in self._rev_cache
+    #     return self.fetch_from_cache_or_service(have_metadata, ssid, False, True)
 
     def _get_details_from_disk(self, ID: str):
         data_file = self._cache_dir.joinpath(ID)
@@ -557,6 +578,25 @@ class SemanticScholar:
         url = self.references_url(ID, num)
         return self._get(url)
 
+    def citations(self, ID: str, offset: int = 0,
+                  count: Optional[int] = None):
+        """Fetch citations for a paper according to range.
+
+        The paper details including initial citations are already assumed to be
+        in cache.
+
+        If none of :code:`beg`, :code:`end`, :code:`count` are given, then
+        send default limit number of citations.
+
+        """
+        data: Dict = self._check_cache(ID)  # type: ignore
+        limit = count or self._config["citations"]["limit"]
+        if data is None:
+            self.details(ID)
+            data = self._check_cache(ID)  # type: ignore
+        retval = data["citations"]["data"][offset+1:offset+limit+1]
+        return [x["citingPaper"] for x in retval]
+
     def next_citations(self, ID: str, num: int = 0) -> Optional[Dict]:
         """Fetch next citations for a paper if any.
 
@@ -604,7 +644,14 @@ class SemanticScholar:
         for val in values:
             status = True
             for k, v in filters.items():
-                status = status and self.filters[k](val[key], **v)  # kwargs only
+                if key in val:
+                    try:
+                        status = status and self.filters[k](val[key], **v)  # kwargs only
+                    except Exception as e:
+                        print(f"Can't apply filter {k} on {val}: {e}")
+                        status = False
+                else:
+                    status = False
             if status:
                 retvals.append(val)
             if num and len(retvals) == num:

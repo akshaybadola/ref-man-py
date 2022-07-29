@@ -10,12 +10,15 @@
 
 ** Persistent Service with Flask
    - Can easily integrate with other applications
+   - Parallel fetching of large number of entries from supported websites
+     (DBLP, ArXiv etc.)
 
 ** HTTP integration with Semantic Scholar API (https://www.semanticscholar.org/product/api)
    - Fetch with multiple IDs like arxiv, ACL etc.
    - Local files based cache to avoid redundant requests
-   - Fetches all metadata in one go (Will change soon as Semantic Scholar is
-     updating its API)
+   - +Fetches all metadata in one go (Will change soon as Semantic Scholar is
+     updating its API)+
+   - Now uses the Semantic Scholar Graph API
 
 ** Experimental (and undocumented) Semantic Scholar Search API
    - Mostly gleaned through analyzing network requests. Helpful for searching
@@ -34,11 +37,12 @@
 
 * Roadmap
 
-
 ** More Tests
-   Always
+   - Coverage is low.
+   - Need to remove some code which isn't used.
+   - Some parts need to be rewritten.
 
-** Change to new Semantic Scholar API
+** Change to new Semantic Scholar API (*Done*)
    Semantic Scholar is changing its API. See https://www.semanticscholar.org/product/api
    we should migrate to new ~graph/v1/paper~ API.
 
@@ -63,3 +67,9 @@
 ** Ultimately integrate ~pndconf~ also
    A document preparation toolchain (See https://github.com/akshaybadola/pndconf),
    which is integrated with ~ref-man~.
+
+* License
+
+  All the code in this repo except for external services and libraries are
+  licensed under AGPL 3.0 (or later). See LICENSE.md in this repo. To learn more
+  about AGPL see https://www.gnu.org/licenses/agpl-3.0.en.html.

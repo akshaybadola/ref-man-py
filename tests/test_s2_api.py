@@ -47,7 +47,7 @@ def test_s2_cache_get_in_metadata_not_on_disk(s2, cache_files):
     assert data["paperId"] in s2._rev_cache
 
 
-def test_s2_cache_get_not_in_metadata_and_disk(s2):
+def test_s2_cache_get_ssid_when_not_in_metadata_and_disk(s2):
     with open(os.path.join(s2._cache_dir, "metadata")) as f:
         metadata = f.read().split("\n")
     line = random.choice(metadata)
@@ -71,7 +71,7 @@ def test_s2_cache_get_not_in_metadata_and_disk(s2):
     assert data["paperId"] in s2._rev_cache
 
 
-def test_s2_cache_get_not_ssid_not_in_metadata_and_disk(s2):
+def test_s2_cache_get_other_than_ssid_and_data_not_in_metadata_and_disk(s2):
     arxiv_id = "2010.06775"
     with open(os.path.join(s2._cache_dir, "metadata")) as f:
         metadata = f.read().split("\n")
@@ -96,6 +96,33 @@ def test_s2_cache_get_not_ssid_not_in_metadata_and_disk(s2):
     assert isinstance(data, dict)
     assert len(data) > 0
     assert data["paperId"] in s2._rev_cache
+
+
+# def test_s2_cache_get_other_than_ssid_and_data_in_metadata_and_disk(s2):
+#     arxiv_id = "1908.03795"
+#     data = s2.get_details_for_id("arxiv", arxiv_id, False)
+#     with open(os.path.join(s2._cache_dir, "metadata")) as f:
+#         metadata = f.read().split("\n")
+#     if arxiv_id in s2._cache[s2.id_types("arxiv")]:
+#         key = s2._cache[s2.id_types("arxiv")][arxiv_id]
+#         metadata.remove(key)
+#         assert len(metadata) == 30
+#         with open(os.path.join(s2._cache_dir, "metadata"), "w") as f:
+#             f.write("\n".join(metadata))
+#     else:
+#         key = None
+#     s2 = SemanticScholar(cache_dir="tests/cache_data/")
+#     assert arxiv_id not in s2._cache[s2.id_types("arxiv")]
+#     if key:
+#         fpath = s2._cache_dir.joinpath(key)
+#         if fpath.exists():
+#             os.remove(fpath)
+#     assert "paperId" in data
+#     fpath = s2._cache_dir.joinpath(data["paperId"])
+#     assert fpath.exists()
+#     assert isinstance(data, dict)
+#     assert len(data) > 0
+#     assert data["paperId"] in s2._rev_cache
 
 
 def test_s2_details_fetches_correct_format_both_on_and_not_on_disk(s2, cache_files):

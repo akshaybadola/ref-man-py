@@ -24,5 +24,13 @@
 
 ** [2022-06-07 Tue 12:23]
    - Added more tests
-   - ~FilesCache~ is no2w in separate file ~files_cache.py~.
+   - ~FilesCache~ is now in separate file ~files_cache.py~.
    - More modulal ~server.py~
+
+** [2022-07-29 Fri 10:45]
+   - In ~SemanticScholar~
+     + Renamed ~server.py~ to ~service.py~ and ~Server~ to ~RefMan~
+     + Added method ~apply_limits~ to filter the data through that.
+     + ~get_all_details~ is now removed.
+     + Fixed an issue where ID other than SSID was not being fetched from cache
+   - In ~RefMan~ added debug mode

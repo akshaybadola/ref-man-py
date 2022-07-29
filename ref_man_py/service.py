@@ -28,10 +28,10 @@ from .semantic_scholar import SemanticScholar, SemanticSearch
 from .cache import CacheHelper
 
 
-app = Flask(__name__)
+app = Flask("RefMan")
 
 
-class Server:
+class RefMan:
     """*ref-man* server for network requests.
 
     We use a separate python process for efficient (and sometimes parallel)
@@ -70,8 +70,8 @@ class Server:
     def __init__(self, host: str, port: int, proxy_port: int, proxy_everything: bool,
                  proxy_everything_port: int, data_dir: Path, local_pdfs_dir: Path,
                  remote_pdfs_dir: str, remote_links_cache: Path,
-                 config_dir: Path, batch_size: int,
-                 chrome_debugger_path: str, verbosity: str, threaded: bool):
+                 config_dir: Path, batch_size: int, chrome_debugger_path: str,
+                 debug: bool, verbosity: str, threaded: bool):
         self.host = "127.0.0.1"
         self.port = port
         self.batch_size = batch_size
@@ -86,12 +86,15 @@ class Server:
         self.config_dir = config_dir
         if not self.config_dir.exists():
             os.makedirs(self.config_dir)
+        self.config_file: Optional[Path] = self.config_dir.joinpath("config.json")
+        self.config_file = self.config_file if self.config_file.exists() else None
+        self.debug = debug
         self.verbosity = verbosity
         self.threaded = threaded
 
         self.set_verbosity()
         self.load_cvf_files()
-        self.s2 = SemanticScholar(cache_dir=self.data_dir)
+        self.s2 = SemanticScholar(cache_dir=self.data_dir, config_file=self.config_file)
         self.init_remote_cache()
 
         # NOTE: Checks only once for the proxy, see util.check_proxy
@@ -228,6 +231,8 @@ class Server:
                 self.proxies = proxies
         return "\n".join(msgs)
 
+    # TODO: There are inconsistencies in how the methods return. Some do via json,
+    #       and some text
     def init_routes(self):
         @app.route("/arxiv", methods=["GET", "POST"])
         def arxiv():
@@ -262,20 +267,21 @@ class Server:
             else:
                 return json.dumps("METHOD NOT IMPLEMENTED")
 
-        @app.route("/s2_details/<ssid>", methods=["GET", "POST"])
-        def s2_details(ssid: str) -> Union[str, bytes]:
-            if request.method == "GET":
-                return json.dumps(self.s2.details(ssid))
-            else:
-                return json.dumps("METHOD NOT IMPLEMENTED")
+        @app.route("/s2_config", methods=["GET"])
+        def s2_config():
+            return json.dumps(self.s2._config)
 
-        @app.route("/s2_all_details/<ssid>", methods=["GET", "POST"])
-        def s2_all_details(ssid: str) -> Union[str, bytes]:
-            """Get paper, metadata, references and citations for SSID."""
-            if request.method == "GET":
-                return json.dumps(self.s2.get_all_details(ssid))
-            else:
-                return json.dumps("METHOD NOT IMPLEMENTED")
+        @app.route("/s2_details/<ssid>", methods=["GET"])
+        def s2_details(ssid: str) -> Union[str, bytes]:
+            return json.dumps(self.s2.details(ssid))
+
+        # @app.route("/s2_all_details/<ssid>", methods=["GET", "POST"])
+        # def s2_all_details(ssid: str) -> Union[str, bytes]:
+        #     """Get paper, metadata, references and citations for SSID."""
+        #     if request.method == "GET":
+        #         return json.dumps(self.s2.get_all_details(ssid))
+        #     else:
+        #         return json.dumps("METHOD NOT IMPLEMENTED")
 
         def s2_citations_references_subr(request, ssid: str, key) -> Union[str, bytes]:
             """Get requested citations or references for a paper.
@@ -288,21 +294,22 @@ class Server:
             See :meth:`s2_citations_references_subr` for details
 
             """
-
+            func = getattr(self.s2, key)
             if "count" in request.args:
                 count = int(request.args["count"])
                 if count > 10000:
                     return json.dumps("MAX 10000 CITATIONS CAN BE FETCHED AT ONCE.")
             else:
-                count = 0
+                count = None
+            offset = int(request.args.get("offset", 0))
             if request.method == "GET":
                 if "filters" in request.args:
                     return json.dumps("FILTERS NOT SUPPORTED WITH GET")
-                count = count or 10000
-                values = self.s2.details(ssid)[key]  # type: ignore
-                values = [x for i, x in enumerate(values) if i < count]
+                values = func(ssid, offset=offset, count=count)  # type: ignore
                 return json.dumps(values)
             else:
+                if hasattr(request, "json"):
+                    print("REQUEST JSON", request.json)
                 data = request.json
                 if not data or (data and "filters" not in data):
                     return json.dumps("METHOD NOT IMPLEMENTED IF filters NOT GIVEN")
@@ -480,6 +487,7 @@ class Server:
                 return self.loge("No url given to check")
             else:
                 url = request.args["url"]
+                return json.dumps("METHOD NOT IMPLEMENTED")
                 progress = self.get.progress(url)
                 if progress:
                     return progress
@@ -615,7 +623,6 @@ class Server:
                 self.logd("Shutting down cache helper.")
                 self.pdf_cache_helper.shutdown()
             func = request.environ.get('werkzeug.server.shutdown')
-            print(f"PROC {self.proc._popen}")
             if func:
                 func()
             elif hasattr(self, "proc"):
@@ -632,7 +639,13 @@ class Server:
 
     def run(self):
         "Run the server"
-        self.proc = Process(target=serving.run_simple,
-                            args=(self.host, self.port, app),
-                            kwargs={"threaded": self.threaded})
-        self.proc.start()
+        if self.debug:
+            self.logd(f"Started Ref Man Service version {__version__} in debug mode")
+            serving.run_simple(self.host, self.port, app, self.threaded)
+            self.proc = None
+        else:
+            self.logd(f"Started Ref Man Service version {__version__}")
+            self.proc = Process(target=serving.run_simple,
+                                args=(self.host, self.port, app),
+                                kwargs={"threaded": self.threaded})
+            self.proc.start()

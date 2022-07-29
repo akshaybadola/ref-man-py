@@ -1,10 +1,10 @@
 import pytest
 import os
 import json
-from ref_man_py import server
+from ref_man_py import service
 
 
-def test_service_load_config(server):
+def test_service_load_config(service):
     # pytest.set_trace()
     # config_file = file_path
     # service = server.Server()

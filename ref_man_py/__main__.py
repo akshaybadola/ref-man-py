@@ -43,6 +43,7 @@ def main():
                         default="",
                         help="Path to chrome debugger script which can validate " +
                         "Semantic Scholar Search params (optional)")
+    parser.add_argument("--debug", action="store_true", help="Run in debug mode")
     parser.add_argument("--verbosity", "-v", type=str, default="info",
                         help="Verbosity level. One of [error, info, debug]")
     parser.add_argument("--version", action="store_true",
@@ -51,7 +52,7 @@ def main():
     if args.version:
         print(f"ref-man-server version {__version__}")
         sys.exit(0)
-    from .server import Server
+    from .service import RefMan
     kwargs = {"host": args.host,
               "port": args.port,
               "proxy_port": args.proxy_port,
@@ -64,10 +65,11 @@ def main():
               "config_dir": args.config_dir,
               "batch_size": args.batch_size,
               "chrome_debugger_path": args.chrome_debugger_path,
+              "debug": args.debug,
               "verbosity": args.verbosity,
               "threaded": args.threaded}
-    server = Server(**kwargs)
-    server.run()
+    service = RefMan(**kwargs)
+    service.run()
 
 
 if __name__ == '__main__':
