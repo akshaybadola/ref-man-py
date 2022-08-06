@@ -477,8 +477,8 @@ class SemanticScholar:
             limit = self._config["citations"]["limit"]
             _data["citations"] = _data["citations"][:limit]
         if "references" in data:
-            limit = self._config["citations"]["limit"]
-            _data["references"] = _data["citations"][:limit]
+            limit = self._config["references"]["limit"]
+            _data["references"] = _data["references"][:limit]
         return _data
 
     # TODO: Do I need two details functions?
