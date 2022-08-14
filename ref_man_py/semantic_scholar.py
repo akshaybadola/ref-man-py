@@ -594,7 +594,15 @@ class SemanticScholar:
         if data is None:
             self.details(ID)
             data = self._check_cache(ID)  # type: ignore
-        retval = data["citations"]["data"][offset+1:offset+limit+1]
+        cite_data = data["citations"]["data"]
+        if offset:
+            if offset + limit > len(cite_data):
+                self.next_citations(ID, limit)
+                data = self._check_cache(ID)  # type: ignore
+                cite_data = data["citations"]["data"]
+            retval = cite_data[offset:offset+limit]
+        else:
+            retval = cite_data[:limit]
         return [x["citingPaper"] for x in retval]
 
     def next_citations(self, ID: str, num: int = 0) -> Optional[Dict]:
@@ -620,7 +628,10 @@ class SemanticScholar:
                 pass
             else:
                 data["citations"]["data"].extend(citations["data"])
-                data["citations"]["next"] = citations["next"]
+                if "next" in citations:
+                    data["citations"]["next"] = citations["next"]
+                else:
+                    data["citations"].pop("next")
                 data["citations"]["offset"] = citations["offset"]
             with open(os.path.join(self._cache_dir, str(paper_id)), "w") as f:
                 json.dump(data, f)

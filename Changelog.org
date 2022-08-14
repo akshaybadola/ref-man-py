@@ -34,3 +34,8 @@
      + ~get_all_details~ is now removed.
      + Fixed an issue where ID other than SSID was not being fetched from cache
    - In ~RefMan~ added debug mode
+
+** [2022-08-14 Sun 17:45]
+   - In ~SemanticScholar~
+     + Fixed incorrect ~next~ citations from ~s2_citations~ and pop "next" when
+       "next" not in returned citations data from S2 graph.
