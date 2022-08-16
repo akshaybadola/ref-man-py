@@ -39,3 +39,7 @@
    - In ~SemanticScholar~
      + Fixed incorrect ~next~ citations from ~s2_citations~ and pop "next" when
        "next" not in returned citations data from S2 graph.
+
+** [2022-08-16 Tue 09:49]
+   - In ~SemanticScholar~
+     + Changed all numeric filters to have ~min~, ~max~ keywords

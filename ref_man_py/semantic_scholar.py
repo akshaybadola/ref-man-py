@@ -44,7 +44,9 @@ class SemanticScholar:
         _filters: Dict[str, Callable] = {"year": year_filter,
                                          "author": author_filter,
                                          "num_citing": num_citing_filter,
+                                         "citationcount": num_citing_filter,
                                          "influential_count": num_influential_count_filter,
+                                         "influentialcitationcount": num_influential_count_filter,
                                          "venue": venue_filter,
                                          "title": title_filter}
         return _filters

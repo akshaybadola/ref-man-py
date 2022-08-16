@@ -1,11 +1,11 @@
-from typing import Dict, List
+from typing import Dict, List, Optional
 import re
 
 
-def year_filter(entry: Dict, min_y: int, max_y: int) -> bool:
-    min_y = -1 if (min_y == "any" or not min_y) else min_y
-    max_y = 10000 if (max_y == "any" or not max_y) else max_y
-    return entry["year"] >= min_y and entry["year"] <= max_y
+def year_filter(entry: Dict, min: int, max: int) -> bool:
+    min = -1 if (min == "any" or not min) else min
+    max = 10000 if (max == "any" or not max) else max
+    return entry["year"] >= min and entry["year"] <= max
 
 
 def author_filter(entry: Dict, author_names: List[str], author_ids: List[str]) -> bool:
@@ -22,9 +22,12 @@ def author_filter(entry: Dict, author_names: List[str], author_ids: List[str]) -
         return False
 
 
-def num_citing_filter(entry: Dict, num: int) -> bool:
+def num_citing_filter(entry: Dict, min: int, max: Optional[int] = None) -> bool:
     """Return True if the number of citations is greater or equal than `num`"""
-    return entry["citationCount"] >= num
+    if max is not None:
+        return entry["citationCount"] >= min and entry["citationCount"] < max
+    else:
+        return entry["citationCount"] >= min
 
 
 def num_influential_count_filter(entry: Dict, num: int) -> bool:

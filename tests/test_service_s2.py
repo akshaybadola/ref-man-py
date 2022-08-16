@@ -76,8 +76,8 @@ def test_server_get_s2_citations_with_filters(server):
     url = f"http://{server.host}:{server.port}"
     key = "13d4c2f76a7c1a4d0a71204e1d5d263a3f5a7986"
     response = requests.post(f"{url}/s2_citations/{key}?count=100",
-                             json={"filters": {"year": {"min_y": 2014, "max_y": 0},
-                                               "num_citing": {"num": 10},
+                             json={"filters": {"year": {"min": 2014, "max": 0},
+                                               "num_citing": {"min": 10},
                                                "title": {"title_re": ".*covid.*", "invert": True}}})
     assert response.status_code == 200
     data = json.loads(response.content)
@@ -87,8 +87,8 @@ def test_server_get_s2_citations_with_filters(server):
     assert all([x["year"] >= 2014 for x in data])
     assert all([x["citationCount"] >= 10 for x in data])
     response = requests.post(f"{url}/s2_citations/{key}?count=5",
-                             json={"filters": {"year": {"min_y": 2014, "max_y": 0},
-                                               "num_citing": {"num": 10},
+                             json={"filters": {"year": {"min": 2014, "max": 0},
+                                               "num_citing": {"min": 10},
                                                "title": {"title_re": ".*covid.*", "invert": True}}})
     assert response.status_code == 200
     data = json.loads(response.content)
