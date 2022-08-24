@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "ref-man-py"
-version = "0.4.8"
+version = "0.4.9"
 description = "Ref Man Python Module"
 authors = ["Akshay <akshay.badola.cs@gmail.com>"]
 license = "GPL-3"

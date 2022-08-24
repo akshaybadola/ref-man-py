@@ -43,3 +43,6 @@
 ** [2022-08-16 Tue 09:49]
    - In ~SemanticScholar~
      + Changed all numeric filters to have ~min~, ~max~ keywords
+
+** [2022-08-24 Wed 09:53]
+   - Normalized more filters with ~min~, ~max~

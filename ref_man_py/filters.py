@@ -30,9 +30,12 @@ def num_citing_filter(entry: Dict, min: int, max: Optional[int] = None) -> bool:
         return entry["citationCount"] >= min
 
 
-def num_influential_count_filter(entry: Dict, num: int) -> bool:
+def num_influential_count_filter(entry: Dict, min: int, max: Optional[int] = None) -> bool:
     """Return True if the influential citations is greater or equal than `num`"""
-    return entry["influentialCitationCount"] >= num
+    if max is not None:
+        return entry["influentialCitationCount"] >= min and entry["influentialCitationCount"] < max
+    else:
+        return entry["influentialCitationCount"] >= min
 
 
 def venue_filter(entry: Dict, venues: List[str]) -> bool:

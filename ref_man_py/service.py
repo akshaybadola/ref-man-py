@@ -308,7 +308,7 @@ class RefMan:
                 values = func(ssid, offset=offset, count=count)  # type: ignore
                 return json.dumps(values)
             else:
-                if hasattr(request, "json"):
+                if self.debug and hasattr(request, "json"):
                     print("REQUEST JSON", request.json)
                 data = request.json
                 if not data or (data and "filters" not in data):
