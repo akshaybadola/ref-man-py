@@ -3,7 +3,9 @@ import sys
 import shutil
 from threading import Thread
 from pathlib import Path
+import time
 sys.path.append('.')
+
 
 import requests
 import pytest
@@ -40,7 +42,11 @@ def s2():
         t.insert(-1, ",,")
     with open("tests/cache_data/metadata", "w") as f:
         f.write("\n".join([",".join(t) for t in temp]))
-    return SemanticScholar(cache_dir="tests/cache_data/")
+    s2 = SemanticScholar(cache_dir="tests/cache_data/")
+    s2_key = os.environ.get("S2_API_KEY")
+    if s2_key:
+        s2._api_key = s2_key
+    return s2
 
 
 @pytest.fixture
@@ -73,9 +79,14 @@ def server():
               "config_dir": Path(__file__).parent.joinpath("config"),
               "batch_size": 16,
               "chrome_debugger_path": None,
+              "debug": False,
               "verbosity": "debug",
               "threaded": True}
     server = Server(**kwargs)
+    s2_key = os.environ.get("S2_API_KEY")
+    if s2_key:
+        server.s2._api_key = s2_key
     server.run()
+    time.sleep(1)
     yield server
     requests.get("http://localhost:9998/shutdown")

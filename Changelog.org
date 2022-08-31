@@ -46,3 +46,21 @@
 
 ** [2022-08-24 Wed 09:53]
    - Normalized more filters with ~min~, ~max~
+
+** [2022-09-01 Thu 05:03]
+   - Separated ~semantic_search.py~
+   - Added LICENSE
+   - Added ~typing_extensions~ for ~TypedDict~ support in ~python3.7~
+   - Added some more tests
+   - In ~semantic_scholar.py~
+     + Added ~TypedDict~ types for key specific typed dicts
+     + Removed ~classmethod~ from filters as that's removed after ~python3.9~
+     + Separated ~_dump~ function and separated the functionality for
+       ~_update_citations~
+     + ~citations_url~ now takes an additional ~offset~ param.
+     + ~validate_fields~ now handles empty citations or references
+     + New function ~_ensure_all_citations~
+     + ~filter_citations~ now calls ~_ensure_all_citations~ to make sure all
+       possible citations are downloaded before filtering
+   - In ~tests/fixtures.py~:
+     + S2_API_KEY is now read from ~env~

@@ -24,7 +24,8 @@ from .util import (fetch_url_info, fetch_url_info_parallel, parallel_fetch,
                    post_json_wrapper, check_proxy_port)
 from .arxiv import arxiv_get, arxiv_fetch, arxiv_helper
 from .dblp import dblp_helper
-from .semantic_scholar import SemanticScholar, SemanticSearch
+from .semantic_scholar import SemanticScholar
+from .semantic_search import SemanticSearch
 from .cache import CacheHelper
 
 
@@ -57,6 +58,7 @@ class RefMan:
                               the params can change sometimes. If it's not given then
                               default params are used and the user must update the params
                               in case of an error.
+        debug: Whether to start the service in debug mode
         verbosity: Verbosity control
         threaded: Start the flask server in threaded mode. Defaults to :code:`True`.
 
@@ -103,6 +105,7 @@ class RefMan:
         # NOTE: Although this is still use here, SS may phase it out
         #       in favour of the graph/search
         self.semantic_search = SemanticSearch(self.chrome_debugger_path)
+        self._app = app
         self.init_routes()
 
     def init_remote_cache(self):

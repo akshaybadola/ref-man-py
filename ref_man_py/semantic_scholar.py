@@ -1,17 +1,62 @@
 from typing import List, Dict, Optional, Union, Tuple, Any, Callable
 import os
-import re
 import json
+import math
 import requests
-from subprocess import Popen, PIPE
-import shlex
 from pathlib import Path
 import asyncio
+import sys
+if sys.version_info.minor > 7:
+    from typing import TypedDict
+else:
+    from typing_extensions import TypedDict
 
 import aiohttp
 
 from .filters import (year_filter, author_filter, num_citing_filter,
                       num_influential_count_filter, venue_filter, title_filter)
+
+
+class SubConfigType(TypedDict):
+    limit: int
+    fields: List[str]
+
+
+class ConfigType(TypedDict):
+    api_key: Optional[str]
+    search: SubConfigType
+    details: SubConfigType
+    citations: SubConfigType
+    references: SubConfigType
+    author: SubConfigType
+    author_papers: SubConfigType
+
+
+CitationType = List[Dict[str, Union[str, Dict[str, str]]]]
+
+
+class CitationsType(TypedDict, total=False):
+    next: int
+    offset: int
+    data: CitationType
+
+
+class DetailsDataType(TypedDict):
+    paperId: str
+    title: str
+    citationCount: int
+    influentialCitationCount: int
+    venue: str
+    year: str
+    authors: List[Dict]
+    citations: CitationsType
+    references: CitationsType
+
+
+class StoredDataType(TypedDict):
+    details: DetailsDataType
+    citations: CitationsType
+    references: CitationsType
 
 
 Cache = Dict[str, Dict[str, str]]
@@ -33,9 +78,8 @@ class SemanticScholar:
 
     """
 
-    @classmethod
     @property
-    def filters(cls) -> Dict[str, Callable]:
+    def filters(self) -> Dict[str, Callable]:
         """Allowed filters on the entries.
 
         ["year", "author", "num_citing", "influential_count", "venue", "title"]
@@ -58,7 +102,7 @@ class SemanticScholar:
         self._cache_dir = Path(cache_dir or self._config.get("cache", None))
         if not self._cache_dir or not Path(self._cache_dir).exists():
             raise FileExistsError(f"{self._cache_dir} doesn't exist")
-        self._in_memory: Dict[str, Dict] = {}
+        self._in_memory: Dict[str, StoredDataType] = {}
         self._cache: Cache = {}
         self._rev_cache: Dict[str, List[str]] = {}
         self._files: List[str] = [*filter(lambda x: not x.endswith("~") and "metadata" not in x,
@@ -86,13 +130,14 @@ class SemanticScholar:
             config = {}
         for k in self._config:
             if k in config:
-                if isinstance(self._config[k], dict):
+                # NOTE: Ignoring the whole thing TypedDict is hard to use for specific use cases
+                if isinstance(self._config[k], dict):  # type: ignore
                     self._config[k].update(config[k])  # type: ignore
                 else:
-                    self._config[k] = config[k]
+                    self._config[k] = config[k]  # type: ignore
 
     @property
-    def default_config(self) -> Dict[str, Dict[str, Any]]:
+    def default_config(self) -> ConfigType:
         """Generate a default config in case config file is not on disk.
 
         """
@@ -158,8 +203,6 @@ class SemanticScholar:
         if invalid_entries:
             print(f"Invalid entries in metadata {os.path.join(self._cache_dir, 'metadata')}.\n" +
                   f"At lines: {','.join([str(x[0]) for x in invalid_entries])}")
-            # import sys
-            # sys.exit(1)
             for k, v, _ in invalid_entries:
                 rest, paper_id = v.rsplit(",", 1)
                 val = ",".join([rest, ",,", paper_id])
@@ -215,7 +258,25 @@ class SemanticScholar:
             response = requests.get(url)
         return response
 
-    def put_all(self, data: Dict[str, Dict[str, str]]):
+    def _dump(self, ID: str, data: StoredDataType):
+        fname = os.path.join(self._cache_dir, str(ID))
+        if len(data["citations"]["data"]) > data["details"]["citationCount"]:
+            data["details"]["citationCount"] = len(data["citations"]["data"])
+        with open(fname, "w") as f:
+            json.dump(data, f)
+        print(f"Wrote file {fname}")
+
+    def _update_citations(self, data: CitationsType,
+                          existing_data: CitationsType):
+        # NOTE: Ignoring as the Dict isn't uniform and it raises error
+        data_cite_ids = {x["citingPaper"]["paperId"] for x in data["data"]}  # type: ignore
+        for x in existing_data["data"]:
+            if x["citingPaper"]["paperId"] not in data_cite_ids:  # type: ignore
+                data["data"].append(x)
+                if "next" in data:
+                    data["next"] += 1
+
+    def put_all(self, data: StoredDataType):
         """Update paper details, references and citations on disk.
 
         We read and write data for individual papers instead of one big json
@@ -229,10 +290,11 @@ class SemanticScholar:
         """
         details = data["details"]
         paper_id = details["paperId"]
-        fname = os.path.join(self._cache_dir, str(paper_id))
-        with open(fname, "w") as f:
-            json.dump(data, f)
-        print(f"Wrote file {fname}")
+        # NOTE: In case force updated and already some citations exist on disk
+        existing_data = self._check_cache(paper_id)
+        if existing_data is not None:
+            self._update_citations(data["citations"], existing_data["citations"])
+        self._dump(paper_id, data)
         ext_ids = {self.id_types(k): v for k, v in details["externalIds"].items()}  # type: ignore
         other_ids = [ext_ids.get(k, "") for k in self._id_keys]  # type: ignore
         for ind, key in enumerate(self._id_keys):
@@ -247,29 +309,7 @@ class SemanticScholar:
             self.update_metadata(paper_id)
         self._in_memory[paper_id] = data
 
-    def put_citations(self, data: Dict[str, Dict[str, str]]):
-        """Update citations in disk cache for a given paper.
-
-        The paper data is already assumed to be on the disk
-
-        Args:
-            data: data for the paper
-
-        """
-        paper_id = str(data["paperId"])
-        citations = data["citations"]
-        with open(os.path.join(self._cache_dir, str(paper_id)), "r+") as f:
-            existing_data = json.load(f)
-            existing_data["citations"]["offset"].update(citations["offset"])
-            existing_data["citations"]["next"].update(citations["next"])
-            existing_data["citations"]["data"].update(citations["data"])
-            json.dump(existing_data, f)
-        other_ids = [data["externalIds"].get(k, "") for k in self._id_keys]  # type: ignore
-        for ind, key in enumerate(self._id_keys):
-            if other_ids[ind]:
-                self._cache[key][other_ids[ind]] = paper_id
-
-    def transform(self, data: Dict[str, Any]) -> Dict[str, Any]:
+    def transform(self, data: Union[StoredDataType, DetailsDataType]) -> DetailsDataType:
         """Transform data before sending as json.
 
         For compatibility with data fetched with older API.
@@ -279,13 +319,13 @@ class SemanticScholar:
 
         """
         if "details" in data:
-            data["details"]["references"] = [x["citedPaper"] for x in data["references"]["data"]]
-            data["details"]["citations"] = [x["citingPaper"] for x in data["citations"]["data"]]
-            return data["details"]
+            data["details"]["references"] = [x["citedPaper"] for x in data["references"]["data"]]  # type: ignore
+            data["details"]["citations"] = [x["citingPaper"] for x in data["citations"]["data"]]  # type: ignore
+            return data["details"]  # type: ignore
         else:
-            return data
+            return data         # type: ignore
 
-    def details_url(self, ID: str):
+    def details_url(self, ID: str) -> str:
         """Return the paper url for a given `ID`
 
         Args:
@@ -295,7 +335,7 @@ class SemanticScholar:
         fields = ",".join(self._config["details"]["fields"])
         return f"{self._root_url}/paper/{ID}?fields={fields}"
 
-    def citations_url(self, ID: str, num: int = 0):
+    def citations_url(self, ID: str, num: int = 0, offset: Optional[int] = None) -> str:
         """Return the citations url for a given `ID`
 
         Args:
@@ -304,9 +344,13 @@ class SemanticScholar:
         """
         fields = ",".join(self._config["citations"]["fields"])
         limit = num or self._config["citations"]["limit"]
-        return f"{self._root_url}/paper/{ID}/citations?fields={fields}&limit={limit}"
+        url = f"{self._root_url}/paper/{ID}/citations?fields={fields}&limit={limit}"
+        if offset is not None:
+            return url + f"&offset={offset}"
+        else:
+            return url
 
-    def references_url(self, ID: str, num: int = 0):
+    def references_url(self, ID: str, num: int = 0) -> str:
         """Return the references url for a given `ID`
 
         Args:
@@ -355,7 +399,7 @@ class SemanticScholar:
         data = await resp.json()
         return data
 
-    async def _paper(self, ID: str) -> Dict[str, Dict]:
+    async def _paper(self, ID: str) -> StoredDataType:
         """Asynchronously fetch paper details, references and citations.
 
         Gather and return the data
@@ -374,9 +418,12 @@ class SemanticScholar:
         async with aiohttp.ClientSession(headers=headers) as session:
             tasks = [self._aget(session, url) for url in urls]
             results = await asyncio.gather(*tasks)
-        return dict(zip(["details", "references", "citations"], results))
+        # NOTE: mypy can't resolve zip of async gather
+        data: StoredDataType = dict(zip(["details", "references", "citations"], results))  # type: ignore
+        return data
 
-    def store_details_and_get(self, ID: str, no_transform) -> Dict:
+    def store_details_and_get(self, ID: str, no_transform) ->\
+            Union[StoredDataType, DetailsDataType]:
         """Get paper details asynchronously and store them.
 
         Fetch paper details, references and citations async.
@@ -389,11 +436,15 @@ class SemanticScholar:
         """
         result = asyncio.run(self._paper(ID))
         self.put_all(result)
-        return result if no_transform else self.transform(result)
+        if no_transform:
+            return result
+        else:
+            return self.transform(result)
 
     def fetch_from_cache_or_service(self, have_metadata: bool,
                                     ID: str, force: bool,
-                                    no_transform: bool) -> Dict:
+                                    no_transform: bool)\
+            -> Union[StoredDataType, DetailsDataType]:
         """Subroutine to fetch from either disk or Semantic Scholar.
 
         Args:
@@ -407,7 +458,8 @@ class SemanticScholar:
             data = self._check_cache(ID)
             if not force:
                 if data is not None:
-                    return data if no_transform else self.transform(data)
+                    # NOTE: StoredData and data are both Dict
+                    return data if no_transform else self.transform(data)  # type: ignore
                 else:
                     print(f"Details for {ID} not present on disk. Will fetch.")
                     return self.store_details_and_get(ID, no_transform)
@@ -499,15 +551,17 @@ class SemanticScholar:
     #     have_metadata = ssid in self._rev_cache
     #     return self.fetch_from_cache_or_service(have_metadata, ssid, False, True)
 
-    def _get_details_from_disk(self, ID: str):
+    def _get_details_from_disk(self, ID: str) -> Optional[StoredDataType]:
         data_file = self._cache_dir.joinpath(ID)
         if data_file.exists():
             print(f"Data for {ID} is on disk")
             with open(data_file, "rb") as f:
                 data = f.read()
-            return data
+            return json.loads(data)
+        else:
+            return None
 
-    def _validate_fields(self, data: Dict[str, Dict]) -> bool:
+    def _validate_fields(self, data: StoredDataType) -> bool:
         details_fields = self._config["details"]["fields"].copy()
         references_fields = self._config["references"]["fields"].copy()
         check_contexts = False
@@ -519,18 +573,26 @@ class SemanticScholar:
             citations_fields.remove("contexts")
         if all(x in data for x in ["details", "references", "citations"]):
             valid_details = all([f in data["details"] for f in details_fields])
-            valid_refs = all([f in data["references"]["data"][0]["citedPaper"]
-                              for f in references_fields])
-            valid_cites = all([f in data["citations"]["data"][0]["citingPaper"]
-                               for f in citations_fields])
+            if data["references"]["data"]:
+                valid_refs = all([f in data["references"]["data"][0]["citedPaper"]
+                                  for f in references_fields])
+            else:
+                valid_refs = True
+            if data["citations"]["data"]:
+                valid_cites = all([f in data["citations"]["data"][0]["citingPaper"]
+                                   for f in citations_fields])
+            else:
+                valid_cites = True
             if check_contexts:
-                valid_refs = valid_refs and "contexts" in data["references"]["data"][0]
-                valid_cites = valid_cites and "contexts" in data["citations"]["data"][0]
+                valid_refs = valid_refs and data["references"]["data"] and\
+                    "contexts" in data["references"]["data"][0]
+                valid_cites = valid_cites and data["citations"]["data"] and\
+                    "contexts" in data["citations"]["data"][0]
             return valid_details and valid_refs and valid_cites
         else:
             return False
 
-    def _check_cache(self, ID: str) -> Optional[Dict]:
+    def _check_cache(self, ID: str) -> Optional[StoredDataType]:
         """Check cache and return data for ID if found.
 
         First the `in_memory` cache is checked and then the on disk cache.
@@ -543,9 +605,8 @@ class SemanticScholar:
             print(f"Data for {ID} not in memory")
             data = self._get_details_from_disk(ID)
             if data:
-                _data = json.loads(data)
-                if self._validate_fields(_data):
-                    self._in_memory[ID] = _data
+                if self._validate_fields(data):
+                    self._in_memory[ID] = data
                 else:
                     print(f"Stale data for {ID}")
                     return None
@@ -580,26 +641,19 @@ class SemanticScholar:
         url = self.references_url(ID, num)
         return self._get(url)
 
-    def citations(self, ID: str, offset: int = 0,
-                  count: Optional[int] = None):
+    def citations(self, ID: str, offset: int = 0, count: Optional[int] = None):
         """Fetch citations for a paper according to range.
-
-        The paper details including initial citations are already assumed to be
-        in cache.
 
         If none of :code:`beg`, :code:`end`, :code:`count` are given, then
         send default limit number of citations.
 
         """
-        data: Dict = self._check_cache(ID)  # type: ignore
+        data = self.fetch_from_cache_or_service(True, ID, False, True)
         limit = count or self._config["citations"]["limit"]
-        if data is None:
-            self.details(ID)
-            data = self._check_cache(ID)  # type: ignore
         cite_data = data["citations"]["data"]
         if offset:
             if offset + limit > len(cite_data):
-                self.next_citations(ID, limit)
+                self.next_citations(ID, limit, offset)
                 data = self._check_cache(ID)  # type: ignore
                 cite_data = data["citations"]["data"]
             retval = cite_data[offset:offset+limit]
@@ -607,7 +661,7 @@ class SemanticScholar:
             retval = cite_data[:limit]
         return [x["citingPaper"] for x in retval]
 
-    def next_citations(self, ID: str, num: int = 0) -> Optional[Dict]:
+    def next_citations(self, ID: str, limit: int = 0, offset: int = 0) -> Optional[Dict]:
         """Fetch next citations for a paper if any.
 
         The paper details including initial citations are already assumed to be
@@ -617,31 +671,25 @@ class SemanticScholar:
             ID: The paper ID
 
         """
-        limit = num or self._config["citations"]["limit"]
+        limit = limit or self._config["citations"]["limit"]
         data = self._check_cache(ID)
-        if data is not None and "next" in data["citations"]:
-            paper_id = data["details"]["paperId"]
-            fields = ",".join(self._config["citations"]["fields"])
-            offset = data["citations"]["next"]
-            url = f"{self._root_url}/paper/{ID}/citations?fields={fields}&limit={limit}&offset={offset}"
-            citations = json.loads(self._get(url).content)
-            if set([x["citingPaper"]["paperId"] for x in citations["data"]]).intersection(
-                    [x["citingPaper"]["paperId"] for x in data["citations"]["data"]]):
-                pass
-            else:
-                data["citations"]["data"].extend(citations["data"])
-                if "next" in citations:
-                    data["citations"]["next"] = citations["next"]
-                else:
-                    data["citations"].pop("next")
-                data["citations"]["offset"] = citations["offset"]
-            with open(os.path.join(self._cache_dir, str(paper_id)), "w") as f:
-                json.dump(data, f)
-            return citations
-        else:
+        if data is None:
+            return {"error": f"Data for {ID} not in cache"}
+        elif data is not None and "next" not in data["citations"]:
             return None
+        else:
+            paper_id = data["details"]["paperId"]
+            _next = data["citations"]["next"]
+            if offset:
+                limit += offset - _next
+            offset = _next
+            url = self.citations_url(paper_id, limit, offset)
+            citations = json.loads(self._get(url).content)
+            self._update_citations(data["citations"], citations)
+            self._dump(paper_id, data)
+            return citations
 
-    def filter_subr(self, key: str, values: List[Dict], filters: Dict[str, Any],
+    def filter_subr(self, key: str, values: CitationType, filters: Dict[str, Any],
                     num: int) -> List[Dict]:
         """Subroutine for filtering papers
 
@@ -659,7 +707,8 @@ class SemanticScholar:
             for k, v in filters.items():
                 if key in val:
                     try:
-                        status = status and self.filters[k](val[key], **v)  # kwargs only
+                        # kwargs only
+                        status = status and self.filters[k](val[key], **v)
                     except Exception as e:
                         print(f"Can't apply filter {k} on {val}: {e}")
                         status = False
@@ -669,7 +718,49 @@ class SemanticScholar:
                 retvals.append(val)
             if num and len(retvals) == num:
                 break
+        # NOTE: Gives error because x[key] evals to Union[str, Dict[str, str]]
         return [x[key] for x in retvals]
+
+    async def _ensure_all_citations(self, ID: str) -> CitationsType:
+        data = self._check_cache(ID)
+        if data is not None:
+            num_cites = data["details"]["citationCount"]
+            offset = data["citations"].get("next", None)
+            if offset:
+                fields = ",".join(self._config["citations"]["fields"])
+                iters = math.ceil((num_cites - offset) / 1000)
+                urls = [f"{self._root_url}/paper/{ID}/citations?fields={fields}&limit=1000"
+                        + f"&offset={offset + (i*1000)}"
+                        for i in range(iters)]
+                if self._api_key:
+                    headers = {"x-api-key": self._api_key}
+                else:
+                    headers = {}
+                print(f"Will fetch {len(urls)} requests for citations")
+                async with aiohttp.ClientSession(headers=headers) as session:
+                    tasks = [self._aget(session, url) for url in urls]
+                    results = await asyncio.gather(*tasks)
+                result: CitationsType = {"next": 0, "offset": 0, "data": []}
+                cite_list = []
+                errors = 0
+                for x in results:
+                    if "error" not in x:
+                        cite_list.extend(x["data"])
+                    else:
+                        errors += 1
+                if errors:
+                    print(f"{errors} errors occured while fetching all citations for {ID}")
+                offset = max(x["offset"] for x in results if "error" not in x)
+                if all("next" in x for x in results):
+                    result["next"] = max(x["next"] for x in results if "error" not in x)
+                else:
+                    result.pop("next")
+                return result
+            else:
+                return data["citations"]
+        else:
+            msg = f"Paper data for {ID} should already exist"
+            raise ValueError(msg)
 
     def filter_citations(self, ID: str, filters: Dict[str, Any], num: int = 0) -> List[Dict]:
         """Filter citations based on given filters.
@@ -685,15 +776,27 @@ class SemanticScholar:
             filters: filter names and arguments
 
         """
-        citations = self._check_cache(ID)["citations"]["data"]  # type: ignore
-        return self.filter_subr("citingPaper", citations, filters, num)
+        existing_data = self._check_cache(ID)
+        data = asyncio.run(self._ensure_all_citations(ID))
+        if existing_data is None:
+            msg = f"data should not be None for ID {ID}"
+            return msg          # type: ignore
+        else:
+            self._update_citations(data, existing_data["citations"])
+            existing_data["citations"] = data
+            self._dump(ID, existing_data)
+            return self.filter_subr("citingPaper", existing_data["citations"]["data"], filters, num)
 
     def filter_references(self, ID: str, filters: Dict[str, Any], num: int = 0):
         """LIke :meth:`filter_citations` but for references
 
 
         """
-        references = self._check_cache(ID)["references"]["data"]  # type: ignore
+        data = self._check_cache(ID)
+        if data is not None:
+            references = data["references"]["data"]
+        else:
+            raise ValueError(f"Data for ID {ID} should be present")
         return self.filter_subr("citedPaper", references, filters, num)
 
     def search(self, query: str) -> Union[str, bytes]:
@@ -711,140 +814,6 @@ class SemanticScholar:
         if response.status_code == 200:
             return response.content
         else:
-            return '"Unknown Error"'
+            return json.dumps({"error": json.loads(response.content)})
 
 
-class SemanticSearch:
-    # Example params:
-    #
-    # {'queryString': '', 'page': 1, 'pageSize': 10, 'sort': 'relevance',
-    #  'authors': [], 'coAuthors': [], 'venues': [], 'yearFilter': None,
-    #  'requireViewablePdf': False, 'publicationTypes': [], 'externalContentTypes': [],
-    #  'fieldsOfStudy': ['computer-science'], 'useFallbackRankerService': False,
-    #  'useFallbackSearchCluster': False, 'hydrateWithDdb': True, 'includeTldrs': False,
-    #  'performTitleMatch': True, 'includeBadges': False, 'tldrModelVersion': 'v2.0.0',
-    #  'getQuerySuggestions': False}
-
-    """Semantic Scholar Search Module
-
-    Args:
-        debugger_path: Optional path to a JS debugger file.
-                       Used for getting the arguments from Semantic Scholar Search
-                       API from a chrome debugger websocket.
-    """
-    def __init__(self, debugger_path: Optional[Path]):
-        self.params_file = Path(__file__).parent.joinpath("ss_default.json")
-        with open(self.params_file) as f:
-            self.default_params = json.load(f)
-        self.params = self.default_params.copy()
-        if debugger_path and debugger_path.exists():
-            self.update_params(debugger_path)
-
-    def update_params(self, debugger_path: Path) -> None:
-        """Update the parameters for Semantic Scholar Search if possible
-
-        Args:
-            debugger_path: Optional path to a JS debugger file.
-
-        """
-        if debugger_path.exists():
-            check_flag = False
-            try:
-                import psutil
-                for p in psutil.process_iter():
-                    cmd = p.cmdline()
-                    if cmd and ("google-chrome" in cmd[0] or "chromium" in cmd[0]):
-                        check_flag = True
-                        break
-            except Exception as e:
-                print(e)
-            if check_flag and cmd:
-                print(f"Trying to update Semantic Scholar Search params")
-                p = Popen(shlex.split(f"node {debugger_path}"), stdout=PIPE, stderr=PIPE)
-                out, err = p.communicate()
-                if err:
-                    print("Chromium running but error communicating with it. Can't update params")
-                    print(err.decode())
-                else:
-                    try:
-                        vals = json.loads(out)
-                        if "request" in vals and 'postData' in vals['request']:
-                            if isinstance(vals['request']['postData'], dict):
-                                vals = vals['request']['postData']
-                            elif isinstance(vals['request']['postData'], str):
-                                vals = json.loads(vals['request']['postData'])
-                            else:
-                                raise Exception("Not sure what data was sent")
-                        self.params = vals.copy()
-                        new_params = set(vals.keys()) - set(self.default_params.keys())
-                        if new_params:
-                            print(f"New params in SS Search {new_params}")
-                        not_params = set(self.default_params.keys()) - set(vals.keys())
-                        if not_params:
-                            print(f"Params not in SS Search {not_params}")
-                        values_to_update = {'performTitleMatch': True,
-                                            'includeBadges': False,
-                                            'includeTldrs': False,
-                                            'fieldsOfStudy': ['computer-science']}
-                        for k, v in values_to_update.items():
-                            if k in self.params:
-                                self.params[k] = v
-                            else:
-                                print(f"Could not update param {k}")
-                        self.params['queryString'] = ''
-                        print(f"Updated params {self.params}")
-                        if new_params or not_params:
-                            with open(self.params_file, "w") as f:
-                                json.dump(self.params, f)
-                            print(f"Dumpted params to file {self.params_file}")
-                    except Exception as e:
-                        print(f"Error updating params {e}. Will use default params")
-                        self.params = self.default_params.copy()
-            else:
-                print("Chromium with debug port not running. Can't update params")
-        else:
-            print(f"Debug script path not given. Using default params")
-
-    def semantic_scholar_search(self, query: str, cs_only: bool = False, **kwargs) ->\
-            Union[str, bytes]:
-        """Perform a search on semantic scholar and return the results.
-
-        The results are returned in JSON format.  By default the search is
-        performed in Computer Science subjects
-
-        Args:
-            query: The string to query
-            cs_only: Whether search only in Computer Science category
-            kwargs: Additional arguments to set for the search
-
-        :code:`publicationTypes` in :code:`kwargs` can be ["Conference", "JournalArticle"]
-        :code:`yearFilter` has to be a :class:`dict` of type {"max": 1995, "min": 1990}
-
-        """
-        params = self.params.copy()
-        params["queryString"] = query
-        if 'yearFilter' in kwargs:
-            yearFilter = kwargs['yearFilter']
-            if yearFilter and not ("min" in yearFilter and "max" in yearFilter and
-                                   yearFilter["max"] > yearFilter["min"]):
-                print("Invalid Year Filter. Disabling.")
-                yearFilter = None
-            params['yearFilter'] = yearFilter
-        if cs_only:
-            params['fieldsOfStudy'] = ['computer-science']
-        else:
-            params['fieldsOfStudy'] = []
-        for k, v in kwargs.items():
-            if k in params and isinstance(v, type(params[k])):
-                params[k] = v
-        headers = {'User-agent': 'Mozilla/5.0', 'Origin': 'https://www.semanticscholar.org'}
-        print("Sending request to semanticscholar search with query" +
-              f": {query} and params {self.params}")
-        response = requests.post("https://www.semanticscholar.org/api/1/search",
-                                 headers=headers, json=params)
-        if response.status_code == 200:
-            results = json.loads(response.content)["results"]
-            print(f"Got {len(results)} results for query: {query}")
-            return response.content  # already json
-        else:
-            return json.dumps({"error": f"ERROR for {query}, {str(response.content)}"})

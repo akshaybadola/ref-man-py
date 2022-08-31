@@ -12,6 +12,35 @@ def test_s2_init(s2):
     assert len(s2._rev_cache) == 31
 
 
+def test_s2_load_config(s2):
+    config = {"search": {"limit": 10,
+                         "fields": ['authors', 'abstract', 'title',
+                                    'venue', 'paperId', 'year',
+                                    'url', 'citationCount',
+                                    'influentialCitationCount',
+                                    'externalIds']},
+              "details": {"limit": 100,
+                          "fields": ['authors', 'abstract', 'title',
+                                     'venue', 'paperId', 'year',
+                                     'url', 'citationCount',
+                                     'influentialCitationCount',
+                                     'externalIds']}}
+
+    if os.path.exists("tests"):
+        config_file = "tests/config/config.json"
+    elif os.path.exists("config"):
+        config_file = "config/config.json"
+    else:
+        config_file = None
+    if not config_file:
+        raise AttributeError("No config file path possible")
+    else:
+        with open(config_file, "w") as f:
+            json.dump(config, f)
+        s2.load_config(config_file)
+        os.remove(config_file)
+
+
 def test_s2_load_cache_with_dups(s2):
     with open(os.path.join(s2._cache_dir, "metadata")) as f:
         metadata = f.read().split("\n")
@@ -28,6 +57,15 @@ def test_s2_cache_get_details_on_disk(s2, cache_files):
     files = [x for x in os.listdir(s2._cache_dir) if "metadata" not in x]
     fl = random.choice(files)
     data = s2.get_details_for_id("ss", fl, False)
+    assert isinstance(data, dict)
+    assert len(data) > 0
+    assert "paperId" in data
+
+
+def test_s2_cache_force_get_details_on_disk(s2):
+    files = [x for x in os.listdir(s2._cache_dir) if "metadata" not in x]
+    fl = random.choice(files)
+    data = s2.get_details_for_id("ss", fl, True)
     assert isinstance(data, dict)
     assert len(data) > 0
     assert "paperId" in data
@@ -144,7 +182,31 @@ def test_s2_details_fetches_correct_format_both_on_and_not_on_disk(s2, cache_fil
 def test_s2_graph_search(s2):
     result = json.loads(s2.search("breiman random forests"))
     assert isinstance(result, dict)
+    assert "error" not in result
     assert result["data"][0]["paperId"] == "13d4c2f76a7c1a4d0a71204e1d5d263a3f5a7986"
+
+
+# def test_s2_update_citation_count_before_writing(s2):
+#     pass
+
+
+# def test_author_stuff(s2):
+#     pass
+
+
+def test_s2_get_citations_with_range(s2):
+    key = "13d4c2f76a7c1a4d0a71204e1d5d263a3f5a7986"
+    if s2._cache_dir.joinpath(key).exists():
+        os.remove(s2._cache_dir.joinpath(key))
+    _ = s2.details(key)
+    data = s2.citations(key, 50, 10)  # guaranteed to exist
+    assert len(data) == 10
+    assert isinstance(data[0], dict)
+    result = s2._check_cache(key)  # exists
+    existing_cites = len(result["citations"]["data"])
+    data = s2.citations(key, existing_cites, 50)
+    assert len(data) == 50
+    assert isinstance(data[0], dict)
 
 
 def test_s2_update_citations(s2):

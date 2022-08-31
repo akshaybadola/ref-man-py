@@ -74,11 +74,15 @@ def test_server_get_s2_citations_without_filters(server):
 
 def test_server_get_s2_citations_with_filters(server):
     url = f"http://{server.host}:{server.port}"
-    key = "13d4c2f76a7c1a4d0a71204e1d5d263a3f5a7986"
+    key = "4543670c4b2d88a9b67525e0084044adef94ae76"
+    # in case data doesn't exist on disk
+    response = requests.get(f"{url}/s2_details/{key}")
+    assert response.status_code == 200
+    filters = {"year": {"min": 2014, "max": 0},
+               "num_citing": {"min": 10},
+               "title": {"title_re": ".*covid.*", "invert": True}}
     response = requests.post(f"{url}/s2_citations/{key}?count=100",
-                             json={"filters": {"year": {"min": 2014, "max": 0},
-                                               "num_citing": {"min": 10},
-                                               "title": {"title_re": ".*covid.*", "invert": True}}})
+                             json={"filters": filters})
     assert response.status_code == 200
     data = json.loads(response.content)
     assert isinstance(data, list)
@@ -87,9 +91,7 @@ def test_server_get_s2_citations_with_filters(server):
     assert all([x["year"] >= 2014 for x in data])
     assert all([x["citationCount"] >= 10 for x in data])
     response = requests.post(f"{url}/s2_citations/{key}?count=5",
-                             json={"filters": {"year": {"min": 2014, "max": 0},
-                                               "num_citing": {"min": 10},
-                                               "title": {"title_re": ".*covid.*", "invert": True}}})
+                             json={"filters": filters})
     assert response.status_code == 200
     data = json.loads(response.content)
     assert isinstance(data, list)
@@ -100,9 +102,37 @@ def test_server_get_s2_citations_with_filters(server):
     assert len(data) == 5
 
 
+def test_server_get_s2_next_citations_when_dont_have_next_citations(server):
+    url = f"http://{server.host}:{server.port}"
+    key = "96382611e8a8139df8771ea5c6b25d553cf3e9a5"
+    if server.s2._cache_dir.joinpath(key).exists():
+        os.remove(server.s2._cache_dir.joinpath(key))
+    response = requests.get(f"{url}/s2_citations/{key}")
+    assert response.status_code == 200
+    data = json.loads(response.content)
+    assert isinstance(data, list)
+    response = requests.get(f"{url}/s2_next_citations/{key}")
+    assert response.status_code == 200
+    data = json.loads(response.content)
+    assert data is None
+
+
+# NOTE: This paper's ID has changed so have added both
+def test_server_get_s2_search(server):
+    query = "On the Generalization Mystery in Deep Learning"
+    url = f"http://{server.host}:{server.port}"
+    response = requests.get(f"{url}/s2_search?q={query}")
+    result = json.loads(response.content)
+    assert "error" not in result
+    assert result["data"][0]["paperId"] in {"85a13ef1ca5a708a0860fdfb35361a55ff3b3d85",
+                                            "1dcaaff675a61e39bf90ebb866bdb6d47161bcc5"}
+
+
 def test_server_get_s2_next_citations_when_have_next_citations(server):
     url = f"http://{server.host}:{server.port}"
     key = "13d4c2f76a7c1a4d0a71204e1d5d263a3f5a7986"
+    if server.s2._cache_dir.joinpath(key).exists():
+        os.remove(server.s2._cache_dir.joinpath(key))
     response = requests.get(f"{url}/s2_citations/{key}")
     assert response.status_code == 200
     data_0 = json.loads(response.content)
@@ -123,27 +153,3 @@ def test_server_get_s2_next_citations_when_have_next_citations(server):
     response = requests.get(f"{url}/s2_citations/{key}?count=10000")
     data_4 = json.loads(response.content)
     assert len(data_4) == 2100
-
-
-def test_server_get_s2_next_citations_when_dont_have_next_citations(server):
-    url = f"http://{server.host}:{server.port}"
-    key = "96382611e8a8139df8771ea5c6b25d553cf3e9a5"
-    response = requests.get(f"{url}/s2_citations/{key}")
-    assert response.status_code == 200
-    data = json.loads(response.content)
-    assert isinstance(data, list)
-    response = requests.get(f"{url}/s2_next_citations/{key}")
-    assert response.status_code == 200
-    data = json.loads(response.content)
-    assert data is None
-
-
-# NOTE: This paper's ID has changed so have added both
-def test_server_get_s2_search(server):
-    query = "On the Generalization Mystery in Deep Learning"
-    url = f"http://{server.host}:{server.port}"
-    response = requests.get(f"{url}/s2_search?q={query}")
-    result = json.loads(response.content)
-    assert "error" not in result
-    assert result["data"][0]["paperId"] in {"85a13ef1ca5a708a0860fdfb35361a55ff3b3d85",
-                                            "1dcaaff675a61e39bf90ebb866bdb6d47161bcc5"}

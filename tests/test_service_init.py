@@ -4,7 +4,7 @@ import json
 from ref_man_py import service
 
 
-def test_service_load_config(service):
+def test_service_load_config(server):
     # pytest.set_trace()
     # config_file = file_path
     # service = server.Server()
