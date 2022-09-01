@@ -12,9 +12,13 @@ else:
     from typing_extensions import TypedDict
 
 import aiohttp
+from common_pyutil.monitor import Timer
 
 from .filters import (year_filter, author_filter, num_citing_filter,
                       num_influential_count_filter, venue_filter, title_filter)
+
+
+timer = Timer()
 
 
 class SubConfigType(TypedDict):
@@ -262,9 +266,10 @@ class SemanticScholar:
         fname = os.path.join(self._cache_dir, str(ID))
         if len(data["citations"]["data"]) > data["details"]["citationCount"]:
             data["details"]["citationCount"] = len(data["citations"]["data"])
-        with open(fname, "w") as f:
-            json.dump(data, f)
-        print(f"Wrote file {fname}")
+        with timer:
+            with open(fname, "w") as f:
+                json.dump(data, f)
+        print(f"Wrote file {fname} in {timer.time} seconds")
 
     def _update_citations(self, data: CitationsType,
                           existing_data: CitationsType):
@@ -748,6 +753,7 @@ class SemanticScholar:
                         cite_list.extend(x["data"])
                     else:
                         errors += 1
+                result["data"] = cite_list
                 if errors:
                     print(f"{errors} errors occured while fetching all citations for {ID}")
                 offset = max(x["offset"] for x in results if "error" not in x)
@@ -777,14 +783,18 @@ class SemanticScholar:
 
         """
         existing_data = self._check_cache(ID)
-        data = asyncio.run(self._ensure_all_citations(ID))
         if existing_data is None:
             msg = f"data should not be None for ID {ID}"
             return msg          # type: ignore
         else:
-            self._update_citations(data, existing_data["citations"])
-            existing_data["citations"] = data
-            self._dump(ID, existing_data)
+            if not existing_data["details"]["citationCount"] ==\
+               len(existing_data["citations"]["data"]):
+                with timer:
+                    data = asyncio.run(self._ensure_all_citations(ID))
+                print(f"Fetched {len(data['data'])} in {timer.time} seconds")
+                self._update_citations(data, existing_data["citations"])
+                existing_data["citations"] = data
+                self._dump(ID, existing_data)
             return self.filter_subr("citingPaper", existing_data["citations"]["data"], filters, num)
 
     def filter_references(self, ID: str, filters: Dict[str, Any], num: int = 0):

@@ -276,7 +276,11 @@ class RefMan:
 
         @app.route("/s2_details/<ssid>", methods=["GET"])
         def s2_details(ssid: str) -> Union[str, bytes]:
-            return json.dumps(self.s2.details(ssid))
+            if "force" in request.args:
+                force = True
+            else:
+                force = False
+            return json.dumps(self.s2.details(ssid, force))
 
         # @app.route("/s2_all_details/<ssid>", methods=["GET", "POST"])
         # def s2_all_details(ssid: str) -> Union[str, bytes]:
