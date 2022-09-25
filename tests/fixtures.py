@@ -42,7 +42,7 @@ def s2():
         t.insert(-1, ",,")
     with open("tests/cache_data/metadata", "w") as f:
         f.write("\n".join([",".join(t) for t in temp]))
-    s2 = SemanticScholar(cache_dir="tests/cache_data/")
+    s2 = SemanticScholar(cache_dir="tests/cache_data/", refs_cache_dir="tests/refs_cache")
     s2_key = os.environ.get("S2_API_KEY")
     if s2_key:
         s2._api_key = s2_key

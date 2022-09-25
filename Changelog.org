@@ -64,3 +64,20 @@
        possible citations are downloaded before filtering
    - In ~tests/fixtures.py~:
      + S2_API_KEY is now read from ~env~
+
+** [2022-09-25 Sun 18:35]
+   - Added ~data.py~ which contains ~CitationsCache~ and other functions
+     to parse the SemanticScholar Citations Data dump.
+   - In ~semantic_scholar.py~
+     + Added ~get_corpus_id~ and ~citations_corpus_id~ convenience functions to
+       get CorpusId from SS hash Id.
+     + ~SemanticScholar~ now takes an optional ~refs_cache_dir~ as an argument.
+     + Added ~headers~ property.
+     + Restructured fetching async urls with ~aiohttp~.
+     + Added ~_build_citations_from_stored_data~ to fetch data from
+       ~CitationsCache~ in case number of citations are > 10000
+   - In ~service.py~
+     + In ~maybe_download_cvf_day_pages~ Fixed downloading CVF page when it's a
+       single page
+     + Also fixed a bug where pages were being downloaded again.
+     + Added ~s2_corpus_id~ route

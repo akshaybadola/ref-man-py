@@ -94,7 +94,10 @@ class RefMan:
         self.verbosity = verbosity
         self.threaded = threaded
 
-        self.set_verbosity()
+        self.init_loggers()
+        if self.config_file:
+            self.logi(f"Loaded config file {self.config_file}")
+
         self.load_cvf_files()
         self.s2 = SemanticScholar(cache_dir=self.data_dir, config_file=self.config_file)
         self.init_remote_cache()
@@ -124,7 +127,7 @@ class RefMan:
             self.logger.warning("All arguments required for pdf cache not given.\n" +
                                 "Will not maintain remote pdf links cache.")
 
-    def set_verbosity(self):
+    def init_loggers(self):
         # We set "error" to warning
         verbosity_levels = {"info", "error", "debug"}
         if self.verbosity not in verbosity_levels:
@@ -147,8 +150,8 @@ class RefMan:
                           for f in os.listdir(self.config_dir)
                           if re.match(r'^(cvpr|iccv)', f.lower())]
         self.soups = {}
-        self.cvf_url_root = "https://openaccess.thecvf.com/"
-        self.logger.debug(f"Loading CVF soups.")
+        self.cvf_url_root = "https://openaccess.thecvf.com"
+        self.logger.debug("Loading CVF soups.")
         for cvf in self.cvf_files:
             match = re.match(r'^(cvpr|iccv)(.*?)([0-9]+)',
                              Path(cvf).name, flags=re.IGNORECASE)
@@ -160,13 +163,12 @@ class RefMan:
                 self.logger.error(f"Could not load file {cvf}")
         self.logger.debug(f"Loaded conference files {self.soups.keys()}")
 
-    def download_cvf_page_and_update_soups(self, venue, year):
-        url = f"{self.cvf_url_root}/{venue.upper()}{year}"
-        resp = requests.get(url)
-        soup = BeautifulSoup(resp.content, features="lxml")
+    def maybe_download_cvf_day_pages(self, response, venue, year):
+        soup = BeautifulSoup(response.content, features="lxml")
         links = soup.find_all("a")
         regexp = f"{venue.upper()}{year}.py"
-        if re.match(regexp + ".+", links[-1].attrs['href']):
+        last_link_attrs = links[-1].attrs
+        if "href" in last_link_attrs and re.match(regexp + ".+", last_link_attrs['href']):
             day_links = [*filter(lambda x: re.match(r"Day [0-9]+?: ([0-9-+])", x.text),
                                  soup.find_all("a"))]
             content = []
@@ -174,18 +176,28 @@ class RefMan:
                 day = re.match(r"Day [0-9]+?: ([0-9-]+)", dl.text).groups()[0]
                 d_url = f"{self.cvf_url_root}/{venue.upper()}{year}.py?day={day}"
                 resp = requests.get(d_url)
+                if resp.status_code != 200:
+                    raise requests.HTTPError(f"Status code {response.status_code} for {d_url}")
                 content.append(resp.content)
                 self.logd(f"Fetched page {i+1} for {venue.upper()}{year} and {day}")
             content = "\n".join([x.decode() for x in content])
         else:
             self.logd(f"Fetched page for {venue.upper()}{year}")
-            content = resp.content.decode()
+            content = response.content.decode()
+        return content
+
+    def download_cvf_page_and_update_soups(self, venue, year):
+        url = f"{self.cvf_url_root}/{venue.upper()}{year}"
+        response = requests.get(url)
+        if response.status_code == 200:
+            content = self.maybe_download_cvf_day_pages(response, venue, year)
+        else:
+            raise requests.HTTPError(f"Status code {response.status_code} for {url}")
         fname = self.config_dir.joinpath(f"{venue.upper()}{year}")
-        if resp.status_code == 200:
-            with open(fname, "w") as f:
-                f.write(content)
+        with open(fname, "w") as f:
+            f.write(content)
         with open(fname) as f:
-            self.soups[(venue.lower(), year)] = BeautifulSoup(f.read(), features="lxml")
+            self.soups[(venue.lower(), year)] = BeautifulSoup(content, features="lxml")
 
     def logi(self, msg: str) -> str:
         self.logger.info(msg)
@@ -269,6 +281,19 @@ class RefMan:
                 return json.dumps(data)
             else:
                 return json.dumps("METHOD NOT IMPLEMENTED")
+
+        @app.route("/s2_corpus_id", methods=["GET"])
+        def s2_corpus_id():
+            if "id" in request.args:
+                id = request.args["id"]
+            else:
+                return json.dumps("NO ID GIVEN")
+            if "id_type" in request.args:
+                id_type = request.args["id_type"]
+            else:
+                return json.dumps("NO ID_TYPE GIVEN")
+            data = self.s2.get_corpus_id(id_type, id)
+            return json.dumps(data)
 
         @app.route("/s2_config", methods=["GET"])
         def s2_config():
@@ -582,7 +607,7 @@ class RefMan:
                            if "href" in x.attrs and x["href"].lower().endswith(".pdf")
                            and re.match(regexp.lower(), x["href"].lower())]
                 if not matches:
-                    return f"{title}"
+                    return f"URL Not found for {title}"
                 elif len(matches) == 1:
                     href = matches[0][0]["href"]
                 else:

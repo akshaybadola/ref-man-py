@@ -69,6 +69,8 @@ def test_s2_cache_force_get_details_on_disk(s2):
     assert isinstance(data, dict)
     assert len(data) > 0
     assert "paperId" in data
+    data = s2._check_cache(fl)
+    assert all(x in data for x in ["details", "citations", "references"])
 
 
 def test_s2_cache_get_in_metadata_not_on_disk(s2, cache_files):
@@ -223,3 +225,56 @@ def test_s2_update_citations(s2):
     next_citations = s2.next_citations(key, 100)
     result = s2._check_cache(key)
     assert len(result["citations"]["data"]) == (2 * s2._config["citations"]["limit"]) + 100
+
+
+def test_s2_data_fetch_refs(s2):
+    assert bool(s2._refs_cache)
+    vals = s2._refs_cache.get_refs(236227353)
+    assert bool(vals)
+
+
+def test_s2_data_build_citations_without_offset_limit(s2):
+    # Has > 140 citations but < 200
+    vals = s2._refs_cache.get_refs(236511142)
+    citations = s2._build_citations_from_stored_data(236511142)
+    assert citations["offset"] == 0
+    assert len(citations["data"]) == len(vals)
+    assert citations["data"][0].keys() == {"citingPaper", "contexts"}
+    assert (set(s2._config["citations"]["fields"]) -
+            citations["data"][0]["citingPaper"].keys()) == {"contexts"}
+
+
+def test_s2_data_build_citations_with_offset_limit(s2):
+    # Has > 140 citations but < 200
+    vals = s2._refs_cache.get_refs(236511142)
+    citations = s2._build_citations_from_stored_data(236511142, [], 50, 50)
+    assert citations["offset"] == 0
+    assert len(citations["data"]) == 50
+    citations = s2._build_citations_from_stored_data(236511142, [], 100, 50)
+    assert citations["offset"] == 0
+    assert len(citations["data"]) == len(vals) % 50
+
+
+# def test_s2_data_next_citations_below_10000(s2):
+#     # Has > 140 citations but < 200
+#     ssid = "13d4c2f76a7c1a4d0a71204e1d5d263a3f5a7986"
+#     offset = 11000
+#     vals = s2.next_citations(ssid, offset=offset)
+#     assert citations["offset"] == 0
+#     assert len(citations["data"]) == 50
+#     citations = s2._build_citations_from_stored_data(236511142, [], 100, 50)
+#     assert citations["offset"] == 0
+#     assert len(citations["data"]) == len(vals) % 50
+
+
+# def test_s2_data_next_citations_above_10000(s2):
+#     # Has > 140 citations but < 200
+#     ssid = "13d4c2f76a7c1a4d0a71204e1d5d263a3f5a7986"
+#     offset = 11000
+#     vals = s2.next_citations(ssid, offset=offset)
+#     assert citations["offset"] == 0
+#     assert len(citations["data"]) == 50
+#     citations = s2._build_citations_from_stored_data(236511142, [], 100, 50)
+#     assert citations["offset"] == 0
+#     assert len(citations["data"]) == len(vals) % 50
+
