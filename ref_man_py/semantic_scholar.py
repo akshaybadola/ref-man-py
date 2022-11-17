@@ -16,7 +16,7 @@ from common_pyutil.monitor import Timer
 
 from .filters import (year_filter, author_filter, num_citing_filter,
                       num_influential_count_filter, venue_filter, title_filter)
-from .data import CitationCache
+from .data import CitationsCache
 
 
 timer = Timer()
@@ -83,14 +83,14 @@ def citations_corpus_ids(data: Dict) -> List[int]:
 
 
 class SemanticScholar:
-    """A Semantic Scholar API client with a files based Cache.
+    """A Semantic Scholar API client with a files based cache.
 
     The cache is a Dictionary of type :code:`Cache` where they keys are one of
     `["acl", "arxiv", "corpus", "doi", "mag", "url"]` and values are a dictionary
-    of that id type and the associated ss_id.
+    of that id type and the associated :code:`ss_id`.
 
-    Each ss_id is stored as a file with the same
-    name as the ss_id and contains the data for the entry in JSON format.
+    Each :code:`ss_id` is stored as a file with the same
+    name as the :code:`ss_id` and contains the data for the entry in JSON format.
 
     Args:
         root: root directory where all the metadata and the
@@ -137,7 +137,7 @@ class SemanticScholar:
 
     def load_refs_cache(self):
         if self._refs_cache_dir and Path(self._refs_cache_dir).exists():
-            self._refs_cache = CitationCache(self._refs_cache_dir)
+            self._refs_cache = CitationsCache(self._refs_cache_dir)
         else:
             self._refs_cache = None
 

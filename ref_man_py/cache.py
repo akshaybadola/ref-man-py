@@ -9,6 +9,19 @@ from threading import Thread, Event
 
 
 class CacheHelper:
+    """A local and remote (via :code:`rclone`) PDF files manager
+
+       The pdf files are linked to publications and be stored in any `rclone`
+       remote instance. The local links are stored in the :code:`cache_file`
+       and can be updated on command.
+
+       Args:
+           local_dir: Local dirctory where pdf files are stored
+           remote_dir: :code:`rclone` remote dirctory where pdf files are stored
+           cache_file: ';' separated file of pdf links
+           logger: the logger instance
+
+    """
     def __init__(self, local_dir: Path, remote_dir: Path,
                  cache_file: Path, logger: logging.Logger):
         self.local_dir = local_dir

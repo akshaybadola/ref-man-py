@@ -19,6 +19,10 @@ class FilesCache:
     Each ss_id is stored as a file with the same
     name as the ss_id and contains the data for the entry in JSON format.
 
+    NOTE: This class is now deprecated and superceded by :class:`SemanticScholar`
+    which ties includes the Semantic Scholar api and the cache with the new
+    graph API.
+
     Args:
         root: root directory where all the metadata and the
               files data will be kept

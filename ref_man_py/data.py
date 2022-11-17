@@ -116,7 +116,7 @@ def convert_keys_from_numpy(cache):
         print(f"Done {i+1} file")
 
 
-class CitationCache:
+class CitationsCache:
     """A Semantic Scholar Citations cache.
 
     Consists of pickle files of :class:`dict` entries with keys as :code:`citedPaper`
