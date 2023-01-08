@@ -463,19 +463,39 @@ class RefMan:
             else:
                 return json.dumps("NO URL or URLs GIVEN")
 
-        @app.route("/fetch_proxy")
-        def fetch_proxy():
-            """Fetch URL with :attr:`self.proxies` if :attr:`self.proxies` is not `None`.
+        @app.route("/set_proxy")
+        def set_proxy():
+            """Set or unset proxy port"""
+            if request.args.get("set"):
+                if request.args.get("proxy_port"):
+                    self.proxy_port = request.args.get("proxy_port")
+                if request.args.get("proxy_everything_port"):
+                    self.proxy_everything_port = request.args.get("proxy_everything_port")
+                return self.check_proxies()
+            elif request.args.get("unset"):
+                self.proxy_port = None
+                self.proxy_everything_port = None
+                self.proxies = None
+                return "Unset all proxies"
+
+        @app.route("/fetch_url")
+        def fetch_url():
+            """Fetch given URL.
+
+            Optionally if :attr:`self.proxies` if :attr:`self.proxies` is
+            not :code:`None` then fetch via those proxies
+
             """
             if "url" in request.args and request.args["url"]:
                 url = request.args["url"]
             else:
                 return json.dumps("NO URL GIVEN or BAD URL")
+            noproxy = request.args.get("noproxy")
             keys = [*request.args.keys()]
             # NOTE: Rest of the keys are part of the URL
             if len(keys) > 1:
                 url = url + "&" + "&".join([f"{k}={v}" for k, v in request.args.items()
-                                            if k != "url"])
+                                            if k not in {"url", "noproxy"}])
             # DEBUG code
             # if url == "https://arxiv.org/pdf/2006.01912":
             #     with os.path.expanduser("~/pdf_file.pdf", "rb") as f:
@@ -484,7 +504,7 @@ class RefMan:
             #     response.headers["Content-Type"] = "application/pdf"
             #     return response
             self.logger.debug(f"Fetching {url} with proxies {self.proxies}")
-            if self.proxies:
+            if not noproxy and self.proxies:
                 try:
                     response = requests.get(url, headers=default_headers, proxies=self.proxies)
                 except requests.exceptions.Timeout:
@@ -496,7 +516,8 @@ class RefMan:
                     self.proxies = None
                     response = requests.get(url, headers=default_headers)
             else:
-                self.logger.warning("Proxy dead. Fetching without proxy")
+                if not noproxy:
+                    self.logger.warning("Proxy dead. Fetching without proxy")
                 response = requests.get(url, headers=default_headers)
             if url.startswith("http:") or response.url.startswith("https:"):
                 return Response(response.content)

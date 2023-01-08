@@ -45,7 +45,7 @@ def main():
                         "Semantic Scholar Search params (optional)")
     parser.add_argument("--debug", action="store_true", help="Run in debug mode")
     parser.add_argument("--verbosity", "-v", type=str, default="info",
-                        help="Verbosity level. One of [error, info, debug]")
+                        choices=["error", "info", "debug"], help="Verbosity level")
     parser.add_argument("--version", action="store_true",
                         help="Print version and exit.")
     args = parser.parse_args()

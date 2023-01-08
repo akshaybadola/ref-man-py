@@ -81,3 +81,8 @@
        single page
      + Also fixed a bug where pages were being downloaded again.
      + Added ~s2_corpus_id~ route
+
+** [2023-01-08 Sun 17:13]
+   - Changed ~fetch_proxy~ in service.py to ~fetch_url~ and also added arg
+     ~noproxy~ to indicate fetch without proxy
+   - Changed default values of SS search params
