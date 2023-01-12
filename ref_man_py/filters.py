@@ -8,7 +8,8 @@ def year_filter(entry: Dict, min: int, max: int) -> bool:
     return entry["year"] >= min and entry["year"] <= max
 
 
-def author_filter(entry: Dict, author_names: List[str], author_ids: List[str]) -> bool:
+def author_filter(entry: Dict, author_names: List[str], author_ids: List[str],
+                  exact: bool) -> bool:
     """Return True if any of the given authors by name or id are in the entry.
 
     Only one of ids or names are checked.
@@ -16,8 +17,13 @@ def author_filter(entry: Dict, author_names: List[str], author_ids: List[str]) -
     """
     if author_ids:
         return any([a == x['authorId'] for a in author_ids for x in entry["authors"]])
-    elif author_names:
+    elif author_names and exact:
         return any([a == x['name'] for a in author_names for x in entry["authors"]])
+    elif author_names and not exact:
+        names = []
+        for x in entry["authors"]:
+            names.extend(x['name'].split(" "))
+        return any([a in map(str.lower, names) for a in author_names])
     else:
         return False
 

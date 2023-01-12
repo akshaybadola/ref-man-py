@@ -273,11 +273,9 @@ class RefMan:
                     id_type = request.args["id_type"]
                 else:
                     return json.dumps("NO ID_TYPE GIVEN")
-                if "force" in request.args:
-                    force = True
-                else:
-                    force = False
-                data = self.s2.get_details_for_id(id_type, id, force)
+                force = True if "force" in request.args else False
+                all_data = True if "all" in request.args else False
+                data = self.s2.get_details_for_id(id_type, id, force, all_data)
                 return json.dumps(data)
             else:
                 return json.dumps("METHOD NOT IMPLEMENTED")

@@ -535,7 +535,8 @@ class SemanticScholar:
             have_metadata, ssid or ids[id_type], False, False)
         return data['externalIds']['CorpusId']
 
-    def get_details_for_id(self, id_type: str, ID: str, force: bool) -> Union[str, Dict]:
+    def get_details_for_id(self, id_type: str, ID: str, force: bool, all_data: bool)\
+            -> Union[str, Dict]:
         """Get paper details from Semantic Scholar Graph API
 
         The on disk cache is checked first and if it's a miss then the
@@ -549,7 +550,8 @@ class SemanticScholar:
                      `['ss', 'doi', 'mag', 'arxiv', 'acl', 'pubmed', 'corpus']`
             ID: paper identifier
             force: Force fetch from Semantic Scholar server, ignoring cache
-
+            all_data: Fetch all details if possible. This can only be done if
+                      the data already exists on disk
         """
         ids = {"doi": f"DOI:{ID}",
                "mag": f"MAG:{ID}",
@@ -567,12 +569,16 @@ class SemanticScholar:
             itype = self.id_types(id_type)
             ssid = self._cache[itype].get(ID, "")
             have_metadata = bool(ssid)
-        return self.apply_limits(self.fetch_from_cache_or_service(
-            have_metadata, ssid or ids[id_type], force, False))
+        data = self.fetch_from_cache_or_service(
+            have_metadata, ssid or ids[id_type], force, False)
+        if all_data:
+            return data
+        else:
+            return self.apply_limits(data)
 
     # CHECK: Is this function here just because I have references and citations?
     #        For consistency?
-    def details(self, ID: str, force: bool = False) -> Union[str, Dict]:
+    def details(self, ID: str, force: bool = False, all_data: bool = False) -> Union[str, Dict]:
         """Get details for paper with SSID :code:`ID`
 
         Args:
@@ -580,7 +586,7 @@ class SemanticScholar:
             force: Whether to force fetch from service
 
         """
-        return self.get_details_for_id("ss", ID, force)
+        return self.get_details_for_id("ss", ID, force, all_data)
 
     def apply_limits(self, data):
         """Apply count limits to S2 data citations and references
@@ -717,14 +723,14 @@ class SemanticScholar:
         data = cast(StoredDataType, data)
         limit = count or self._config["citations"]["limit"]
         cite_data = data["citations"]["data"]
-        if offset:
-            if offset + limit > len(cite_data):
-                self.next_citations(ID, limit, offset)
-                data = self._check_cache(ID)  # type: ignore
-                cite_data = data["citations"]["data"]
-            retval = cite_data[offset:offset+limit]
-        else:
-            retval = cite_data[:limit]
+        total_cites = data["details"]["citationCount"]
+        if offset + limit > total_cites:
+            limit = total_cites - offset
+        if offset + limit > len(cite_data):
+            self.next_citations(ID, limit, offset)
+            data = self._check_cache(ID)  # type: ignore
+            cite_data = data["citations"]["data"]
+        retval = cite_data[offset:offset+limit]
         return [x["citingPaper"] for x in retval]
 
     # TODO: Although this fetches the appropriate data based on citations on disk
@@ -738,6 +744,10 @@ class SemanticScholar:
 
         Args:
             ID: The paper ID
+
+        There is an issue with S2 API in that even though it may show :code:`n`
+        number of citing papers, when actually fetching the citation data it
+        retrieves fewer citations sometimes.
 
         """
         limit = limit or self._config["citations"]["limit"]
@@ -765,33 +775,37 @@ class SemanticScholar:
             self._dump(paper_id, data)
             return citations
 
-    def filter_subr(self, key: str, values: CitationType, filters: Dict[str, Any],
+    def filter_subr(self, key: str, citation_data: CitationType, filters: Dict[str, Any],
                     num: int) -> List[Dict]:
-        """Subroutine for filtering papers
+        """Subroutine for filtering references and citations
 
         Each filter function is called with the arguments and the results are AND'ed.
 
         Args:
             key: One of "references" or "citations"
-            values: The values (paper details) to filter
+            citation_data: citation (or references) data to filter
             filters: Filter names and kwargs
 
         """
         retvals = []
-        for val in values:
+        for citation in citation_data:
             status = True
-            for k, v in filters.items():
-                if key in val:
+            for filter_name, filter_args in filters.items():
+                # key is either citedPaper or citingPaper
+                # This is a bit redundant as key should always be there but this will
+                # catch edge cases
+                if key in citation:
                     try:
                         # kwargs only
-                        status = status and self.filters[k](val[key], **v)
+                        filter_func = self.filters[filter_name]
+                        status = status and filter_func(citation[key], **filter_args)
                     except Exception as e:
-                        print(f"Can't apply filter {k} on {val}: {e}")
+                        print(f"Can't apply filter {filter_name} on {citation}: {e}")
                         status = False
                 else:
                     status = False
             if status:
-                retvals.append(val)
+                retvals.append(citation)
             if num and len(retvals) == num:
                 break
         # NOTE: Gives error because x[key] evals to Union[str, Dict[str, str]]

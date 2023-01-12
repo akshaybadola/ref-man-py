@@ -56,7 +56,7 @@ def test_s2_load_cache_with_dups(s2):
 def test_s2_cache_get_details_on_disk(s2, cache_files):
     files = [x for x in os.listdir(s2._cache_dir) if "metadata" not in x]
     fl = random.choice(files)
-    data = s2.get_details_for_id("ss", fl, False)
+    data = s2.get_details_for_id("ss", fl, False, False)
     assert isinstance(data, dict)
     assert len(data) > 0
     assert "paperId" in data
@@ -65,7 +65,7 @@ def test_s2_cache_get_details_on_disk(s2, cache_files):
 def test_s2_cache_force_get_details_on_disk(s2):
     files = [x for x in os.listdir(s2._cache_dir) if "metadata" not in x]
     fl = random.choice(files)
-    data = s2.get_details_for_id("ss", fl, True)
+    data = s2.get_details_for_id("ss", fl, True, False)
     assert isinstance(data, dict)
     assert len(data) > 0
     assert "paperId" in data
@@ -79,7 +79,7 @@ def test_s2_cache_get_in_metadata_not_on_disk(s2, cache_files):
     fpath = s2._cache_dir.joinpath(fl)
     os.remove(fpath)
     assert not fpath.exists()
-    data = s2.get_details_for_id("ss", fl, False)
+    data = s2.get_details_for_id("ss", fl, False, False)
     assert fpath.exists()
     assert isinstance(data, dict)
     assert len(data) > 0
@@ -102,7 +102,7 @@ def test_s2_cache_get_ssid_when_not_in_metadata_and_disk(s2):
     fpath = s2._cache_dir.joinpath(key)
     if fpath.exists():
         os.remove(fpath)
-    data = s2.get_details_for_id("ss", key, False)
+    data = s2.get_details_for_id("ss", key, False, False)
     assert fpath.exists()
     assert isinstance(data, dict)
     assert len(data) > 0
@@ -129,7 +129,7 @@ def test_s2_cache_get_other_than_ssid_and_data_not_in_metadata_and_disk(s2):
         fpath = s2._cache_dir.joinpath(key)
         if fpath.exists():
             os.remove(fpath)
-    data = s2.get_details_for_id("arxiv", arxiv_id, False)
+    data = s2.get_details_for_id("arxiv", arxiv_id, False, False)
     assert "paperId" in data
     fpath = s2._cache_dir.joinpath(data["paperId"])
     assert fpath.exists()
@@ -167,7 +167,7 @@ def test_s2_cache_get_other_than_ssid_and_data_not_in_metadata_and_disk(s2):
 
 def test_s2_details_fetches_correct_format_both_on_and_not_on_disk(s2, cache_files):
     fl = random.choice(cache_files)
-    details = s2.get_details_for_id("ss", fl, False)
+    details = s2.get_details_for_id("ss", fl, False, False)
     assert "paperId" in details
     assert "citations" in details
     assert "references" in details
@@ -175,7 +175,7 @@ def test_s2_details_fetches_correct_format_both_on_and_not_on_disk(s2, cache_fil
     if fl in cache_files:
         os.remove(f"tests/cache_data/{fl}")
         cache_files.remove(fl)
-    details = s2.get_details_for_id("ss", fl, False)
+    details = s2.get_details_for_id("ss", fl, False, False)
     assert "paperId" in details
     assert "citations" in details
     assert "references" in details

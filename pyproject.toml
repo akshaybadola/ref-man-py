@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "ref-man-py"
-version = "0.5.3"
+version = "0.5.4"
 description = "Ref Man Python Module"
 authors = ["Akshay <akshay.badola.cs@gmail.com>"]
 license = "GPL-3"
@@ -28,7 +28,7 @@ beautifulsoup4 = "^4.9.1"
 psutil = "^5.8.0"
 PyYAML = "^5.4.1"
 lxml = "^4.6.4"
-common_pyutil = "^0.8.0"
+common_pyutil = "^0.8.5"
 aiohttp = "^3.8.1"
 typing-extensions = {version = "*", python = "3.7.x"}
 

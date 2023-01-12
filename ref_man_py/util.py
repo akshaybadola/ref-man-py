@@ -9,6 +9,7 @@ import logging
 
 from bs4 import BeautifulSoup
 import flask
+from common_pyutil.proc import call
 
 from .const import default_headers
 from .q_helper import ContentType
@@ -164,3 +165,14 @@ def post_json_wrapper(request: flask.Request, fetch_func: Callable[[str, Queue],
         content.update(helper(q))
         j += 1
     return json.dumps(content)
+
+
+def import_pdfs(files: List[str]):
+    info = {}
+    for f in files:
+        out, err = call(f"pdfinfo {f}")
+        title, subject = out.split("\n")[:2]
+        title = re.split(r"[ \t]+", title, 1)[1]
+        doi = re.split(r"[ \t]+", subject, 1)[1].split(";")[-1]
+        info[f"{f}"] = {"title": title, "doi": doi}
+    return info

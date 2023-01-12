@@ -86,3 +86,12 @@
    - Changed ~fetch_proxy~ in service.py to ~fetch_url~ and also added arg
      ~noproxy~ to indicate fetch without proxy
    - Changed default values of SS search params
+
+** [2023-01-12 Thu 18:24]
+   - In ~filters.py~ added partial and exact match in author filter
+   - In ~semantic_scholar~:
+     + ~SemanticScholar.get_details_for_id~ now can fetch all data if present on disk
+     + Some refactoring in ~SemanticScholar.citations~ and
+       ~SemanticScholar.filter_subr~
+     + Added ~import_pdfs~ in ~util.py~
+
