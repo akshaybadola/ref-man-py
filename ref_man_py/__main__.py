@@ -9,8 +9,7 @@ from . import __version__
 
 def main():
     default_config_dir = Path.home().joinpath(".config/ref-man")
-    parser = argparse.ArgumentParser("ref-man",
-                                     formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+    parser = argparse.ArgumentParser("ref-man", formatter_class=argparse.RawTextHelpFormatter)
     parser.add_argument("--no-threaded", dest="threaded", action="store_false",
                         help="Whether flask server should be threaded or not")
     parser.add_argument("--host", default="localhost",
@@ -24,13 +23,16 @@ def main():
     parser.add_argument("--proxy-everything-port", dest="proxy_everything_port",
                         type=int, default=0,
                         help="HTTP proxy server port if proxy_everything is given")
-    parser.add_argument("--data-dir", "-d", dest="data_dir", type=str,
+    parser.add_argument("--data-dir", "-d", dest="data_dir", type=Path,
                         default=default_config_dir.joinpath("s2_cache"),
                         help="Semantic Scholar cache directory")
-    parser.add_argument("--local-pdfs-dir", dest="local_pdfs_dir", type=Path,
+    parser.add_argument("--refs-cache-dir", "-r", dest="refs_cache_dir", type=Path,
+                        help="Semantic Scholar References cache directory\n" +
+                        "It's built from full dump of Semantic Scholar data")
+    parser.add_argument("--local-pdfs-dir", "-l", dest="local_pdfs_dir", type=Path,
                         default=default_config_dir.joinpath("pdfs"),
                         help="Local directory where pdfs are stored")
-    parser.add_argument("--remote-pdfs-dir", dest="remote_pdfs_dir", type=str,
+    parser.add_argument("--remote-pdfs-dir", dest="remote_pdfs_dir", type=Path,
                         default="", help="Remote rclone pdfs directory")
     parser.add_argument("--remote-links-cache", dest="remote_links_cache", type=Path,
                         default=Path(""), help="Remote links cache file")
@@ -39,7 +41,7 @@ def main():
                         help="Directory where configuration related files are kept")
     parser.add_argument("--batch-size", "-b", dest="batch_size", type=int, default=16,
                         help="Simultaneous connections to DBLP")
-    parser.add_argument("--chrome-debugger-path", dest="chrome_debugger_path", type=str,
+    parser.add_argument("--chrome-debugger-path", dest="chrome_debugger_path", type=Path,
                         default="",
                         help="Path to chrome debugger script which can validate " +
                         "Semantic Scholar Search params (optional)")
@@ -59,10 +61,11 @@ def main():
               "proxy_everything": args.proxy_everything,
               "proxy_everything_port": args.proxy_everything_port,
               "data_dir": args.data_dir,
+              "refs_cache_dir": args.refs_cache_dir,
+              "config_dir": Path(args.config_dir),
               "local_pdfs_dir": args.local_pdfs_dir,
               "remote_pdfs_dir": args.remote_pdfs_dir,
               "remote_links_cache": args.remote_links_cache,
-              "config_dir": args.config_dir,
               "batch_size": args.batch_size,
               "chrome_debugger_path": args.chrome_debugger_path,
               "debug": args.debug,

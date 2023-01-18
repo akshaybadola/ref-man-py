@@ -95,3 +95,10 @@
        ~SemanticScholar.filter_subr~
      + Added ~import_pdfs~ in ~util.py~
 
+** [2023-01-18 Wed 14:26]
+   - Added ~refs-cache-dir~ to ~__main__~ and ~service.RefMan~
+   - Fixed some associated bugs in ~SemanticScholar~
+   - Aded ~import_elsevier_pdfs~ and ~import_icra22_pdfs~ to util.py
+     though I'm not sure if they should be there.
+   - Version bump to 0.6.0
+

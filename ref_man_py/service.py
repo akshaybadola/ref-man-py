@@ -47,10 +47,11 @@ class RefMan:
                                Used by supported methods.
         data_dir: Directory where the Semantic Scholar Cache is stored.
                   See :func:`load_ss_cache`
+        config_dir: Directory to store configuration related files
+        refs_cache_dir: Directory of Semantic Scholar References Cache
         local_pdfs_dir: Local directory where the pdf files are stored.
         remote_pdfs_dir: Remote directory where the pdf files are stored.
         remote_links_cache: File mapping local pdfs to remote links.
-        config_dir: Directory to store configuration related files
         batch_size: Number of parallel requests to send in case parallel requests is
                     implemented for that method.
         chrome_debugger_path: Path for the chrome debugger script.
@@ -67,17 +68,21 @@ class RefMan:
 
     """
     # TODO: Generate default config and place in config dir.
-    #       Also allow the user to add config options like request headers,
+    #       As of now only SemanticScholar configuration is loaded if it exists
+    # TODO: Also allow the user to add config options like request headers,
     #       proxy ports, data_dir etc.
     def __init__(self, host: str, port: int, proxy_port: int, proxy_everything: bool,
-                 proxy_everything_port: int, data_dir: Path, local_pdfs_dir: Path,
-                 remote_pdfs_dir: str, remote_links_cache: Path,
-                 config_dir: Path, batch_size: int, chrome_debugger_path: str,
+                 proxy_everything_port: int, data_dir: Path, refs_cache_dir: Path,
+                 config_dir: Path, local_pdfs_dir: Path,
+                 remote_pdfs_dir: Path, remote_links_cache: Path,
+                 batch_size: int, chrome_debugger_path: Path,
                  debug: bool, verbosity: str, threaded: bool):
         self.host = "127.0.0.1"
         self.port = port
         self.batch_size = batch_size
-        self.data_dir = Path(data_dir)
+        self.data_dir = data_dir
+        self.config_dir = config_dir
+        self.refs_cache_dir = refs_cache_dir
         self.local_pdfs_dir = local_pdfs_dir
         self.remote_pdfs_dir = remote_pdfs_dir
         self.remote_links_cache = remote_links_cache
@@ -85,7 +90,6 @@ class RefMan:
         self.proxy_everything = proxy_everything
         self.proxy_everything_port = proxy_everything_port
         self.chrome_debugger_path = Path(chrome_debugger_path) if chrome_debugger_path else None
-        self.config_dir = config_dir
         if not self.config_dir.exists():
             os.makedirs(self.config_dir)
         self.config_file: Optional[Path] = self.config_dir.joinpath("config.json")
@@ -99,7 +103,8 @@ class RefMan:
             self.logi(f"Loaded config file {self.config_file}")
 
         self.load_cvf_files()
-        self.s2 = SemanticScholar(cache_dir=self.data_dir, config_file=self.config_file)
+        self.s2 = SemanticScholar(config_file=self.config_file, cache_dir=self.data_dir,
+                                  refs_cache_dir=self.refs_cache_dir)
         self.init_remote_cache()
 
         # NOTE: Checks only once for the proxy, see util.check_proxy

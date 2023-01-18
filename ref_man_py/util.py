@@ -167,12 +167,29 @@ def post_json_wrapper(request: flask.Request, fetch_func: Callable[[str, Queue],
     return json.dumps(content)
 
 
-def import_pdfs(files: List[str]):
-    info = {}
+def import_icra22_pdfs(files: List[str]):
+    info: Dict[str, Optional[Dict]] = {}
     for f in files:
         out, err = call(f"pdfinfo {f}")
+        # Not sure how to check for other IEEE
         title, subject = out.split("\n")[:2]
         title = re.split(r"[ \t]+", title, 1)[1]
         doi = re.split(r"[ \t]+", subject, 1)[1].split(";")[-1]
         info[f"{f}"] = {"title": title, "doi": doi}
+    return info
+
+
+def import_elsevier_pdfs(files: List[str]):
+    info: Dict[str, Optional[Dict]] = {}
+    for f in files:
+        out, err = call(f"pdfinfo {f}")
+        # Elsevier?
+        if re.match(r"[\s\S.]+creator.+elsevier.*", out, flags=re.IGNORECASE):
+            subject = out.split("\n")[0]
+        match = re.match(r".+doi:(.+)", subject)
+        if match is not None:
+            doi = match.groups()[0]
+            info[f"{f}"] = {"doi": doi}
+        else:
+            info[f"{f}"] = None
     return info

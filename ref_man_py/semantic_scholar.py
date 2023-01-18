@@ -2,6 +2,8 @@ from typing import List, Dict, Optional, Union, Tuple, Any, Callable, cast
 import os
 import json
 import math
+import time
+import random
 import requests
 from pathlib import Path
 import asyncio
@@ -37,13 +39,7 @@ class ConfigType(TypedDict):
     author_papers: SubConfigType
 
 
-CitationType = List[Dict[str, Union[str, Dict[str, str]]]]
-
-
-class CitationsType(TypedDict, total=False):
-    next: int
-    offset: int
-    data: CitationType
+ContextType = str
 
 
 class DetailsDataType(TypedDict):
@@ -54,9 +50,20 @@ class DetailsDataType(TypedDict):
     venue: str
     year: str
     authors: List[Dict]
-    citations: CitationsType
-    references: CitationsType
+    # citations: "CitationsType"
+    # references: "CitationsType"
     externalIds: Dict[str, Union[int, str]]
+
+
+class CitationType(TypedDict):
+    contexts: List[str]
+    citingPaper: DetailsDataType
+
+
+class CitationsType(TypedDict, total=False):
+    next: int
+    offset: int
+    data: List[CitationType]
 
 
 class StoredDataType(TypedDict):
@@ -68,12 +75,16 @@ class StoredDataType(TypedDict):
 Cache = Dict[str, Dict[str, str]]
 
 
-def get_corpus_id(data: Dict):
+def get_corpus_id(data: Union[CitationType, DetailsDataType]) -> int:
     if "externalIds" in data:
-        cid = data["externalIds"]["CorpusId"]
+        if data["externalIds"]:                   # type: ignore
+            cid = data["externalIds"]["CorpusId"]  # type: ignore
+            return int(cid)
     elif "citingPaper" in data:
-        cid = data["citingPaper"]["externalIds"]["CorpusId"]
-    return cid
+        if data["citingPaper"]["externalIds"]:                   # type: ignore
+            cid = data["citingPaper"]["externalIds"]["CorpusId"]  # type: ignore
+            return int(cid)
+    return -1
 
 
 def citations_corpus_ids(data: Dict) -> List[int]:
@@ -130,14 +141,16 @@ class SemanticScholar:
                                           os.listdir(self._cache_dir))]
         self._id_keys = ['DOI', 'MAG', 'ARXIV', 'ACL', 'PUBMED', 'URL', 'CorpusId']
         self._id_keys.sort()
-        self._batch_size = 100
+        self._batch_size = 1000  # FIXME: No need for this really
         self._tolerance = 2
+        self._dont_build_citations = set()
         self.load_metadata()
         self.load_refs_cache()
 
     def load_refs_cache(self):
         if self._refs_cache_dir and Path(self._refs_cache_dir).exists():
             self._refs_cache = CitationsCache(self._refs_cache_dir)
+            print(f"Loaded Full Semantic Scholar Citations Cache from {self._refs_cache_dir}")
         else:
             self._refs_cache = None
 
@@ -304,6 +317,7 @@ class SemanticScholar:
     def _update_citations(self, data: CitationsType,
                           existing_data: CitationsType):
         # NOTE: Ignoring as the Dict isn't uniform and it raises error
+        data["data"] = [*filter(lambda x: "error" not in x["citingPaper"], data["data"])]
         data_cite_ids = {x["citingPaper"]["paperId"] for x in data["data"]}  # type: ignore
         for x in existing_data["data"]:
             if x["citingPaper"]["paperId"] not in data_cite_ids:  # type: ignore
@@ -440,9 +454,13 @@ class SemanticScholar:
         URLs are fetched with :class:`aiohttp.ClientSession` with api_key included
 
         """
-        async with aiohttp.ClientSession(headers=self.headers) as session:
-            tasks = [self._aget(session, url) for url in urls]
-            results = await asyncio.gather(*tasks)
+        try:
+            timeout = aiohttp.ClientTimeout(total=5)
+            async with aiohttp.ClientSession(headers=self.headers, timeout=timeout) as session:
+                tasks = [self._aget(session, url) for url in urls]
+                results = await asyncio.gather(*tasks)
+        except asyncio.exceptions.TimeoutError:
+            return []
         return results
 
     async def _paper(self, ID: str) -> StoredDataType:
@@ -677,6 +695,10 @@ class SemanticScholar:
             data = self._get_details_from_disk(ID)
             if data:
                 if self._validate_fields(data):
+                    data["citations"]["data"] =\
+                        [x for x in data["citations"]["data"] if "paperId" in x["citingPaper"]]
+                    data["references"]["data"] =\
+                        [x for x in data["references"]["data"] if "paperId" in x["citedPaper"]]
                     self._in_memory[ID] = data
                 else:
                     print(f"Stale data for {ID}")
@@ -759,10 +781,11 @@ class SemanticScholar:
         else:
             if offset+limit > 10000:
                 corpus_id = get_corpus_id(data["details"])
-                citations = self._build_citations_from_stored_data(
-                    corpus_id,
-                    citations_corpus_ids(data),
-                    offset, limit)
+                if corpus_id:
+                    citations = self._build_citations_from_stored_data(
+                        corpus_id,
+                        citations_corpus_ids(data),
+                        offset, limit)
             else:
                 paper_id = data["details"]["paperId"]
                 _next = data["citations"]["next"]
@@ -775,7 +798,7 @@ class SemanticScholar:
             self._dump(paper_id, data)
             return citations
 
-    def filter_subr(self, key: str, citation_data: CitationType, filters: Dict[str, Any],
+    def filter_subr(self, key: str, citation_data: List[CitationType], filters: Dict[str, Any],
                     num: int) -> List[Dict]:
         """Subroutine for filtering references and citations
 
@@ -817,32 +840,40 @@ class SemanticScholar:
         if data is not None:
             num_cites = data["details"]["citationCount"]
             offset = data["citations"].get("next", None)
-            if offset:
-                fields = ",".join(self._config["citations"]["fields"])
-                iters = math.ceil((num_cites - offset) / 1000)
-                urls = [f"{self._root_url}/paper/{ID}/citations?fields={fields}&limit=1000"
-                        + f"&offset={offset + (i*1000)}"
-                        for i in range(iters)]
-                print(f"Will fetch {len(urls)} requests for citations")
-                with timer:
-                    results = await self._get_some_urls(urls)
-                result: CitationsType = {"next": 0, "offset": 0, "data": []}
-                cite_list = []
-                errors = 0
-                for x in results:
-                    if "error" not in x:
-                        cite_list.extend(x["data"])
+            if offset is not None:
+                if offset < 10000 and num_cites > 10000:
+                    print("Warning: More than 10000 citations cannot be fetched. "
+                          "Will only get first 10000")
+                    fields = ",".join(self._config["citations"]["fields"])
+                    iters = min(10, math.ceil((num_cites - offset) / 1000))
+                    urls = [f"{self._root_url}/paper/{ID}/citations?fields={fields}&limit=1000"
+                            + f"&offset={offset + (i*1000)}"
+                            for i in range(iters)]
+                    print(f"Will fetch {len(urls)} requests for citations")
+                    print(f"All urls {urls}")
+                    with timer:
+                        results = await self._get_some_urls(urls)
+                    print(f"Got {len(results)} results")
+                    result: CitationsType = {"next": 0, "offset": 0, "data": []}
+                    cite_list = []
+                    errors = 0
+                    for x in results:
+                        if "error" not in x:
+                            cite_list.extend(x["data"])
+                        else:
+                            errors += 1
+                    result["data"] = cite_list
+                    print(f"Have {len(cite_list)} citations without errors")
+                    if errors:
+                        print(f"{errors} errors occured while fetching all citations for {ID}")
+                    offset = max([*[x["offset"] for x in results if "error" not in x], 10000])
+                    if all("next" in x for x in results):
+                        result["next"] = max([*[x["next"] for x in results if "error" not in x], 10000])
                     else:
-                        errors += 1
-                result["data"] = cite_list
-                if errors:
-                    print(f"{errors} errors occured while fetching all citations for {ID}")
-                offset = max(x["offset"] for x in results if "error" not in x)
-                if all("next" in x for x in results):
-                    result["next"] = max(x["next"] for x in results if "error" not in x)
+                        result.pop("next")
+                    return result
                 else:
-                    result.pop("next")
-                return result
+                    return data["citations"]
             else:
                 return data["citations"]
         else:
@@ -864,7 +895,7 @@ class SemanticScholar:
 
         """
 
-        refs_ids = self._refs_cache.get_refs(int(corpus_id))
+        refs_ids = self._refs_cache.get_citations(int(corpus_id))
         if not refs_ids:
             raise AttributeError(f"Not found for {corpus_id}")
         if existing_ids:
@@ -873,6 +904,9 @@ class SemanticScholar:
             need_ids = list(refs_ids)
         if not limit:
             limit = len(need_ids)
+        if len(need_ids) > 10000:
+            print("WARNING: More than 10000 citations cannot be fetched."
+                  "You have stale SS data")
         need_ids = need_ids[offset:offset+limit]
         # Remove contexts as that's not available in paper details
         fields = ",".join(self._config["citations"]["fields"]).replace(",contexts", "")
@@ -884,9 +918,15 @@ class SemanticScholar:
         # Fetch batch_size examples at a time to prevent overloading the service
         _urls = urls[j*batch_size:(j+1)*batch_size]
         while _urls:
-            print(f"Fetching for j {j} and {len(_urls)} urls")
+            print(f"Fetching for j {j} out of {len(urls)//batch_size} urls")
             with timer:
                 results = asyncio.run(self._get_some_urls(_urls))
+                while not results:
+                    wait_time = random.randint(1, 5)
+                    print(f"Got empty results. Waiting {wait_time}")
+                    time.sleep(wait_time)
+                    results = asyncio.run(self._get_some_urls(_urls))
+            # print(f"Got results in {timer.time} seconds")
             citations["data"].extend(results)  # type: ignore
             j += 1
             _urls = urls[j*batch_size:(j+1)*batch_size]
@@ -913,14 +953,39 @@ class SemanticScholar:
             msg = f"data should not be None for ID {ID}"
             return msg          # type: ignore
         else:
+            update = False
             if abs(existing_data["details"]["citationCount"] -
                    len(existing_data["citations"]["data"])) > self._tolerance:
                 with timer:
                     data = asyncio.run(self._ensure_all_citations(ID))
-                print(f"Fetched {len(data['data'])} in {timer.time} seconds")
-                self._update_citations(data, existing_data["citations"])
-                existing_data["citations"] = data
-                self._dump(ID, existing_data)
+                if len(data['data']) > len(existing_data["citations"]["data"]):
+                    self._update_citations(data, existing_data["citations"])
+                    print(f"Fetched {len(data['data'])} in {timer.time} seconds")
+                    update = True
+                if existing_data["details"]["citationCount"] > 10000:
+                    existing_ids = [get_corpus_id(x) for x in existing_data["citations"]["data"]]
+                    if -1 in existing_ids:
+                        existing_ids.remove(-1)
+                    corpus_id = get_corpus_id(existing_data["details"])  # type: ignore
+                    if not corpus_id:
+                        raise AttributeError("Did not expect corpus_id to be 0")
+                    if corpus_id not in self._dont_build_citations:
+                        more_data = self._build_citations_from_stored_data(corpus_id, existing_ids)
+                        new_ids = set([x["citingPaper"]["paperId"]
+                                       for x in more_data["data"]
+                                       if "error" not in x and "citingPaper" in x
+                                       and "paperId" in x["citingPaper"]])
+                        data_ids = set(x["citingPaper"]["paperId"] for x in data["data"])
+                        something_new = new_ids - data_ids
+                        if not something_new:
+                            self._dont_build_citations.add(corpus_id)
+                        if more_data["data"] and something_new:
+                            print(f"Fetched {len(more_data['data'])} in {timer.time} seconds")
+                            self._update_citations(more_data, data)
+                            update = True
+                if update:
+                    existing_data["citations"] = data
+                    self._dump(ID, existing_data)
             return self.filter_subr("citingPaper", existing_data["citations"]["data"], filters, num)
 
     def filter_references(self, ID: str, filters: Dict[str, Any], num: int = 0):
