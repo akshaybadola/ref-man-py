@@ -1,4 +1,5 @@
 from typing import Dict, cast, Optional
+import sys
 import glob
 import gzip
 import json
@@ -189,3 +190,12 @@ class CitationsCache:
             else:
                 print(f"Could not find reference data for {ID}")
                 return None
+
+
+
+if __name__ == '__main__':
+    root_dir = sys.argv[1]
+    if not os.path.exists(root_dir):
+        raise ValueError(f"No such directory {root_dir}")
+    parse_citations(root_dir)
+    split_citations(Path(root_dir))
