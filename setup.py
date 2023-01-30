@@ -2,7 +2,7 @@
 
 from setuptools import setup
 
-from ref_man import __version__
+from ref_man_py import __version__
 
 with open("README.org") as f:
     long_description = f.read()
@@ -28,7 +28,7 @@ setup(
         "Topic :: Scientific/Engineering",
         "Topic :: Text Editors :: Emacs",
     ],
-    packages=["ref_man"],
+    packages=["ref_man_py"],
     include_package_data=True,
     package_data={'': ['ss_default.json']},
     python_requires=">=3.7",
@@ -38,7 +38,8 @@ setup(
                       "psutil>=5.8.0",
                       "PyYAML>=5.4.1",
                       "lxml>=4.6.4",
-                      "common_pyutil>=0.8.0"],
+                      "common_pyutil>=0.8.5",
+                      "aiohttp>=3.8.1"],
     entry_points={
         'console_scripts': [
             'ref-man = ref_man:__main__.main',
