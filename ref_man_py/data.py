@@ -1,4 +1,4 @@
-from typing import Dict, cast, Optional
+from typing import Dict, Optional
 import sys
 import glob
 import gzip
@@ -15,25 +15,26 @@ __doc__ = """Module to process Semantic Scholar Data."""
 timer = Timer()
 
 
-def parse_citations(root_dir):
+def parse_citations(root_dir: Path):
     citations = defaultdict(set)
-    filenames = glob.glob(root_dir + "*gz")
-    for filename in filenames:
+    filenames = glob.glob(str(root_dir.joinpath("*gz")))
+    for f_num, filename in enumerate(filenames):
         with gzip.open(filename, "rt") as s2_file:
             for i, line in enumerate(s2_file):
                 data = json.loads(line)
                 if data["citedcorpusid"] and data["citingcorpusid"]:
                     a, b = int(data["citedcorpusid"]), int(data["citingcorpusid"])
-                if not (i % 999999):
+                    citations[a].add(b)
+                if not (i+1) % 1000000:
                     print(f"{i+1} done for file {filename}")
-                citations[a].add(b)
-    out_file = os.path.join(root_dir, "citations.pkl")
+        print(f"Done file {f_num+1} out of {len(filenames)}")
+    out_file = root_dir.joinpath("citations.pkl")
     print(f"Writing file {out_file}")
     with open(out_file, "wb") as f:
         pickle.dump(citations, f)
 
 
-def save_temp(output_dir, data, i):
+def save_temp(output_dir: Path, data: Dict, i: int):
     """Dump a temp pickle file of adjacency list
 
     Args:
@@ -48,7 +49,8 @@ def save_temp(output_dir, data, i):
     print(f"Dumped for {i} in {timer.time} seconds")
 
 
-def split_and_dump_citations(input_dir, output_dir, citations, max_key):
+def split_and_dump_citations(input_dir: Path, output_dir: Path,
+                             citations: Dict, max_key: int):
     """Split and dump the citations
 
     Args:
@@ -75,7 +77,7 @@ def split_and_dump_citations(input_dir, output_dir, citations, max_key):
                     save_temp(output_dir, temp, b)
                     return
         print(f"Done for {b} in {timer.time} seconds")
-        save_temp(temp, b)
+        save_temp(output_dir, temp, b)
         j += 1
 
 
@@ -135,6 +137,7 @@ class CitationsCache:
         self._root_dir = root_dir
         _root_dir = str(root_dir).removesuffix("/") + "/"
         files = glob.glob(_root_dir + "*.pkl")
+        files.remove(str(root_dir.joinpath("citations.pkl")))
         files.sort()
         _files: Dict[int, str] = {int(f.replace(_root_dir, "").
                                       replace("temp_", "").
@@ -194,8 +197,8 @@ class CitationsCache:
 
 
 if __name__ == '__main__':
-    root_dir = sys.argv[1]
-    if not os.path.exists(root_dir):
+    root_dir = Path(sys.argv[1])
+    if not root_dir.exists():
         raise ValueError(f"No such directory {root_dir}")
     parse_citations(root_dir)
-    split_citations(Path(root_dir))
+    split_citations(root_dir)

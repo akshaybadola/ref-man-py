@@ -102,3 +102,14 @@
      though I'm not sure if they should be there.
    - Version bump to 0.6.0
 
+** [2023-01-30 Mon 11:13]
+   - In ~service.py~
+     + Added ~s2_all_details~ route
+   - Added type annotations to ~data.py~
+   - In ~semantic_scholar.py~
+     + Changed ~_update_citations~ to be more generic
+     + ~_ensure_all_citations~ is cleaner
+     + Separate function ~_fetch_citations_greater_than_10000~
+     + Separate function ~_get_some_urls_in_batches~
+     + More modular ~_build_citations_from_stored_data~
+

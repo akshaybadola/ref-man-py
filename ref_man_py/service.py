@@ -310,13 +310,15 @@ class RefMan:
                 force = False
             return json.dumps(self.s2.details(ssid, force))
 
-        # @app.route("/s2_all_details/<ssid>", methods=["GET", "POST"])
-        # def s2_all_details(ssid: str) -> Union[str, bytes]:
-        #     """Get paper, metadata, references and citations for SSID."""
-        #     if request.method == "GET":
-        #         return json.dumps(self.s2.get_all_details(ssid))
-        #     else:
-        #         return json.dumps("METHOD NOT IMPLEMENTED")
+        @app.route("/s2_all_details/<ssid>", methods=["GET", "POST"])
+        def s2_all_details(ssid: str) -> Union[str, bytes]:
+            """Get paper, metadata, references and ALL citations for SSID."""
+            if "force" in request.args:
+                print("Force not supported with s2_all_details")
+            if request.method == "GET":
+                return json.dumps(self.s2.details(ssid, all_data=True))
+            else:
+                return json.dumps("METHOD NOT IMPLEMENTED")
 
         def s2_citations_references_subr(request, ssid: str, key) -> Union[str, bytes]:
             """Get requested citations or references for a paper.
