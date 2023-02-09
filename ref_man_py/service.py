@@ -417,6 +417,26 @@ class RefMan:
                 # TODO: Not Implemented yet
                 return json.dumps("METHOD NOT IMPLEMENTED")
 
+        @app.route("/recommendations", methods=["GET", "POST"])
+        def recommendations():
+            """Search Semantic Scholar for a query string via the graph api."""
+            count = int(request.args.get("count", 0))
+            if request.method == "GET":
+                if "paperid" in request.args:
+                    paperid = [request.args["paperid"]]
+                else:
+                    return json.dumps("NO paperid given")
+                return self.s2.recommendations(paperid, [], count)
+            else:
+                data = request.json
+                pos_ids = data.get("pos-ids", None)
+                neg_ids = data.get("neg-ids", None)
+                if not pos_ids:
+                    return json.dumps("pos-ids not given")
+                if not neg_ids:
+                    return json.dumps("neg-ids not given")
+                return self.s2.recommendations(pos_ids, neg_ids, count)
+
         @app.route("/s2_search", methods=["GET", "POST"])
         def s2_search():
             """Search Semantic Scholar for a query string via the graph api."""

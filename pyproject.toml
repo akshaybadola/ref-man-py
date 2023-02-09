@@ -1,9 +1,9 @@
 [tool.poetry]
 name = "ref-man-py"
-version = "0.6.2"
+version = "0.6.3"
 description = "Ref Man Python Module"
 authors = ["Akshay <akshay.badola.cs@gmail.com>"]
-license = "GPL-3"
+license = "AGPL-3"
 readme = "README.org"
 homepage = "https://github.com/akshaybadola/ref-man-py"
 classifiers=[

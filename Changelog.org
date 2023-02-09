@@ -113,3 +113,7 @@
      + Separate function ~_get_some_urls_in_batches~
      + More modular ~_build_citations_from_stored_data~
 
+** [2023-02-10 Fri 03:02]
+   - Added ~recommendations~ function in ~semanticscholar.py~ and endpoint in
+     service.
+

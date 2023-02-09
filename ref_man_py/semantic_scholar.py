@@ -145,7 +145,7 @@ class SemanticScholar:
         #       and there's no way to change this. This is going to fetch fairly slowly
         #       Since my timeout is 5 secs, I can try fetching with 500
         self._batch_size = 500
-        self._tolerance = 2
+        self._tolerance = 10
         self._dont_build_citations = set()
         self._aio_timeout = aiohttp.ClientTimeout(10)
         self.load_metadata()
@@ -1043,6 +1043,34 @@ class SemanticScholar:
         else:
             raise ValueError(f"Data for ID {ID} should be present")
         return self.filter_subr("citedPaper", references, filters, num)
+
+    def recommendations(self, pos_ids: List[str], neg_ids: List[str], count: int = 0):
+        """Fetch recommendations from S2 API
+
+        Args:
+            pos_ids: Positive paper ids
+            neg_ids: Negative paper ids
+            count: Number of recommendations to fetch
+
+        """
+        root_url = "https://api.semanticscholar.org/recommendations/v1/papers"
+        if neg_ids:
+            response = requests.post(root_url,
+                                     json={"positivePaperIds": pos_ids,
+                                           "negativePaperIds": neg_ids})
+        else:
+            response = requests.get(f"{root_url}/forpaper/{pos_ids[0]}")
+        if response.status_code == 200:
+            recommendations = json.loads(response.content)["recommendedPapers"]
+            urls = [self.details_url(x["paperId"])
+                    for x in recommendations]
+            if count:
+                urls = urls[:count]
+            results = asyncio.run(self._get_some_urls(urls))
+            return json.dumps(results)
+        else:
+            return json.dumps({"error": json.loads(response.content)})
+
 
     def search(self, query: str) -> Union[str, bytes]:
         """Search for query string on Semantic Scholar with graph search API.
