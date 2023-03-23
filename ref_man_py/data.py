@@ -137,7 +137,8 @@ class CitationsCache:
         self._root_dir = root_dir
         _root_dir = str(root_dir).removesuffix("/") + "/"
         files = glob.glob(_root_dir + "*.pkl")
-        files.remove(str(root_dir.joinpath("citations.pkl")))
+        if str(root_dir.joinpath("citations.pkl")) in files:
+            files.remove(str(root_dir.joinpath("citations.pkl")))
         files.sort()
         _files: Dict[int, str] = {int(f.replace(_root_dir, "").
                                       replace("temp_", "").

@@ -117,3 +117,9 @@
    - Added ~recommendations~ function in ~semanticscholar.py~ and endpoint in
      service.
 
+** [2023-03-23 Thu 09:46]
+   - Instead of loading soups at init, we load only pdf links extracted from
+     soups as it was taking too long. Added Separate functionality for all that.
+   - Some changes in service.py to satisfy ruff
+
+
