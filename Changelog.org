@@ -122,4 +122,6 @@
      soups as it was taking too long. Added Separate functionality for all that.
    - Some changes in service.py to satisfy ruff
 
+** [2023-04-07 Fri 05:21]
+   - Changed default SS search params
 
