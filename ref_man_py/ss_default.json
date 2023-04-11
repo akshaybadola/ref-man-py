@@ -11,7 +11,6 @@
   "queryString": "",
   "requireViewablePdf": false,
   "sort": "relevance",
-  "tldrModelVersion": "v2.0.0",
   "useFallbackRankerService": false,
   "useFallbackSearchCluster": false,
   "venues": [],

@@ -39,6 +39,7 @@ setup(
                       "PyYAML>=5.4.1",
                       "lxml>=4.6.4",
                       "common_pyutil>=0.8.5",
+                      "markupsafe==2.0.1",
                       "aiohttp>=3.8.1"],
     entry_points={
         'console_scripts': [
