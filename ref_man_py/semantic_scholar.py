@@ -543,7 +543,7 @@ class SemanticScholar:
             return self.store_details_and_get(ID, no_transform)
 
     # TODO: Don't we expect the other data to be in cache?
-    def _corpus_id(self, id_type: str, ID: str) -> Union[str, int]:
+    def id_to_corpus_id(self, id_type: str, ID: str) -> Union[str, int]:
         ids = {"doi": f"DOI:{ID}",
                "mag": f"MAG:{ID}",
                "arxiv": f"ARXIV:{ID}",

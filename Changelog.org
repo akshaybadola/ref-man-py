@@ -125,3 +125,8 @@
 ** [2023-04-07 Fri 05:21]
    - Changed default SS search params
 
+** [2023-07-05 Wed 14:00]
+   - Separated ~CVF~ module and added docs to it.
+   - Fixed a minor bug where an undefined reference to ~s2.get_corpus_id~
+     existed in the service
+

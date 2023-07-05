@@ -1,8 +1,6 @@
 from typing import List, Dict, Optional, Tuple, Union
 import json
-import operator
 import os
-import re
 import time
 from pathlib import Path
 from threading import Thread
@@ -14,9 +12,6 @@ import psutil
 from flask import Flask, request, Response
 from werkzeug import serving
 
-import bs4
-from bs4 import BeautifulSoup
-
 from common_pyutil.log import get_stream_logger
 
 from . import __version__
@@ -25,6 +20,7 @@ from .util import (fetch_url_info, fetch_url_info_parallel,
                    parallel_fetch, post_json_wrapper, check_proxy_port)
 from .arxiv import arxiv_get, arxiv_fetch, arxiv_helper
 from .dblp import dblp_helper
+from .cvf import CVF
 from .semantic_scholar import SemanticScholar
 from .semantic_search import SemanticSearch
 from .cache import CacheHelper
@@ -99,21 +95,17 @@ class RefMan:
         self.verbosity = verbosity
         self.threaded = threaded
 
-        self._requests_timeout = 5
-        self._requests_fetch_url_timeout = 60
+        self._requests_timeout = 60
 
         self.init_loggers()
         if self.config_file:
             self.logi(f"Loaded config file {self.config_file}")
 
-        self.cvf_url_root = "https://openaccess.thecvf.com"
-        self.soups: Dict[Tuple, bs4.Tag] = {}
-        self.cvf_pdf_links: Dict[Tuple, List[str]] = {}
-        # self.load_cvf_files()
-        self.load_cvf_pdf_links()
         self.s2 = SemanticScholar(config_file=self.config_file, cache_dir=self.data_dir,
                                   refs_cache_dir=self.refs_cache_dir)
         self.init_remote_cache()
+
+        self.cvf_helper = CVF(self.config_dir, self.logger)
 
         # NOTE: Checks only once for the proxy, see util.check_proxy
         #       for a persistent solution
@@ -126,9 +118,6 @@ class RefMan:
 
     def _get(self, url: str, **kwargs) -> requests.Response:
         return requests.get(url, timeout=self._requests_timeout, **kwargs)
-
-    def _get_url(self, url: str, **kwargs) -> requests.Response:
-        return requests.get(url, timeout=self._requests_fetch_url_timeout, **kwargs)
 
     def init_remote_cache(self):
         """Initialize cache (and map) of remote and local pdf files.
@@ -157,140 +146,6 @@ class RefMan:
         else:
             self.logger = get_stream_logger("ref_man_logger", log_level=self.verbosity)
             self.logger.debug(f"Log level is set to {self.verbosity}.")
-
-    def load_cvf_files(self):
-        """Load the CVF Soups from HTML files.
-
-        XML parses via :class:`BeautifulSoup` are maintained for easy
-        fetching of an article in case it's availble.
-
-        """
-        self.cvf_files = [os.path.join(self.config_dir, f)
-                          for f in os.listdir(self.config_dir)
-                          if re.match(r'^(cvpr|iccv)', f.lower())
-                          and not f.endswith("_pdfs")]
-        self.logger.debug("Loading CVF soups.")
-        for cvf in self.cvf_files:
-            if not cvf.endswith("_pdfs"):
-                match = re.match(r'^(cvpr|iccv)(.*?)([0-9]+)',
-                                 Path(cvf).name, flags=re.IGNORECASE)
-                if match:
-                    venue, _, year = map(str.lower, match.groups())
-                    with open(cvf) as f:
-                        self.soups[(venue, year)] = BeautifulSoup(f.read(), features="lxml")
-                else:
-                    self.logger.error(f"Could not load file {cvf}")
-        self.logger.debug(f"Loaded conference files {self.soups.keys()}")
-
-    def load_cvf_pdf_links(self):
-        """Load the CVF PDF links saved from HTML files.
-
-        """
-        self.cvf_pdf_link_files = [os.path.join(self.config_dir, f)
-                                   for f in os.listdir(self.config_dir)
-                                   if re.match(r'^(cvpr|iccv)', f.lower())
-                                   and f.endswith("_pdfs")]
-        self.logger.debug("Loading CVF pdf links.")
-        for fname in self.cvf_pdf_link_files:
-            match = re.match(r'^(cvpr|iccv)(.*?)([0-9]+)',
-                             Path(fname).name, flags=re.IGNORECASE)
-            if match:
-                venue, _, year = map(str.lower, match.groups())
-                with open(fname) as f:
-                    self.cvf_pdf_links[(venue, year)] = f.read().split("\n")
-            else:
-                self.logger.error(f"Could not load pdf links from {fname}")
-        self.logger.debug(f"Loaded PDF links {self.cvf_pdf_links.keys()}")
-
-    def maybe_download_cvf_day_pages(self, response, venue, year):
-        soup = BeautifulSoup(response.content, features="lxml")
-        links = soup.find_all("a")
-        regexp = f"(/)?({venue.upper()}{year}(.py)?).+"
-        last_link_attrs = links[-1].attrs
-        venue_match = re.match(regexp, last_link_attrs['href'])
-        venue_group = venue_match and venue_match.group(2)
-        if "href" in last_link_attrs and venue_group:
-            day_links = [*filter(lambda x: re.match(r"Day [0-9]+?: ([0-9-+])", x.text),
-                                 soup.find_all("a"))]
-            content = []
-            for i, dl in enumerate(day_links):
-                day = re.match(r"Day [0-9]+?: ([0-9-]+)", dl.text).groups()[0]
-                d_url = f"{self.cvf_url_root}/{venue_group}?day={day}"
-                resp = self._get(d_url)
-                if not resp.ok:
-                    err = f"Status code {response.status_code} for {d_url}"
-                    raise requests.HTTPError(err)
-                content.append(resp.content)
-                self.logd(f"Fetched page {i+1} for {venue.upper()}{year} and {day}")
-            soup_content = BeautifulSoup("")
-            for c in content:
-                soup_content.extend(BeautifulSoup(c, features="lxml").html)
-            return soup_content.decode()
-        self.logd(f"Fetched page for {venue.upper()}{year}")
-        return response.content.decode()
-
-    def download_cvf_page_and_update_soups(self, venue, year):
-        url = f"{self.cvf_url_root}/{venue.upper()}{year}"
-        response = self._get(url)
-        if response.ok:
-            content = self.maybe_download_cvf_day_pages(response, venue, year)
-        else:
-            err = f"Status code {response.status_code} for {url}"
-            raise requests.HTTPError(err)
-        fname = self.config_dir.joinpath(f"{venue.upper()}{year}")
-        with open(fname, "w") as f:
-            f.write(content)
-        with open(fname) as f:
-            self.soups[(venue.lower(), year)] = BeautifulSoup(content, features="lxml")
-
-    def return_link_subr(self, title, matches) -> str:
-        if not matches:
-            return f"URL Not found for {title}"
-        elif len(matches) == 1:
-            href = matches[0].group(0)
-        else:
-            matches.sort(key=lambda x: operator.abs(operator.sub(*x.span())))
-            href = matches[-1].group(0)
-        href = "https://openaccess.thecvf.com/" + href.lstrip("/")
-        return f"{title};{href}"
-
-    def find_link_from_soups(self, keys, title) -> Optional[str]:
-        links = []
-        for k in keys:
-            links.extend(self.soups[k].find_all("a"))
-        if links:
-            regexp = ".*" + ".*".join([*filter(None, title.split(" "))][:3]) + ".*\\.pdf$"
-            matches = [*filter(None, map(lambda x: re.match(regexp, x["href"], flags=re.IGNORECASE)
-                                         if "href" in x.attrs else None, links))]
-            return self.return_link_subr(title, matches)
-        else:
-            return None
-
-    def find_pdf_link(self, keys, title) -> Optional[str]:
-        links = []
-        for k in keys:
-            links.extend(self.cvf_pdf_links[k])
-        if links:
-            regexp = ".*" + ".*".join([*filter(None, title.split(" "))][:3]) + ".*\\.pdf$"
-            matches = [*filter(None, map(lambda x: re.match(regexp, x, flags=re.IGNORECASE), links))]
-            return self.return_link_subr(title, matches)
-        else:
-            return None
-
-    def save_cvf_pdf_links_and_update(self, venue: str, year: str, soup) -> None:
-        links = soup.find_all("a")
-        pdf_links = [x["href"] for x in links
-                     if "href" in x.attrs and x["href"].endswith(".pdf")]
-        fname = self.config_dir.joinpath(f"{venue.upper()}{year}_pdfs")
-        with open(fname, "w") as f:
-            f.write("\n".join(pdf_links))
-        self.cvf_pdf_links[(venue, year)] = pdf_links
-
-    def read_cvf_pdf_links(self, venue: str, year: str) -> List[str]:
-        fname = self.config_dir.joinpath(f"{venue.upper()}{year}_pdfs")
-        with open(fname) as f:
-            pdf_links = f.read().split("\n")
-        return pdf_links
 
     def logi(self, msg: str) -> str:
         self.logger.info(msg)
@@ -385,7 +240,7 @@ class RefMan:
                 id_type = request.args["id_type"]
             else:
                 return json.dumps("NO ID_TYPE GIVEN")
-            data = self.s2.get_corpus_id(id_type, id)
+            data = self.s2.id_to_corpus_id(id_type, id)
             return json.dumps(data)
 
         @app.route("/s2_config", methods=["GET"])
@@ -620,19 +475,19 @@ class RefMan:
             self.logger.debug(f"Fetching {url} with proxies {self.proxies}")
             if not noproxy and self.proxies:
                 try:
-                    response = self._get_url(url, headers=default_headers, proxies=self.proxies)
+                    response = self._get(url, headers=default_headers, proxies=self.proxies)
                 except requests.exceptions.Timeout:
                     self.logger.error("Proxy not reachable. Fetching without proxy")
                     self.proxies = None
-                    response = self._get_url(url, headers=default_headers)
+                    response = self._get(url, headers=default_headers)
                 except requests.exceptions.ProxyError:
                     self.logger.error("Proxy not reachable. Fetching without proxy")
                     self.proxies = None
-                    response = self._get_url(url, headers=default_headers)
+                    response = self._get(url, headers=default_headers)
             else:
                 if not noproxy:
                     self.logger.warning("Proxy dead. Fetching without proxy")
-                response = self._get_url(url, headers=default_headers)
+                response = self._get(url, headers=default_headers)
             if url.startswith("http:") or response.url.startswith("https:"):
                 return Response(response.content)
             elif response.url != url:
@@ -717,18 +572,7 @@ class RefMan:
             else:
                 venue = request.args["venue"].lower()
             year = request.args.get("year")
-            if year:
-                keys = [(v, y) for v, y in self.cvf_pdf_links if v == venue and y == year]
-            else:
-                keys = [(v, y) for v, y in self.cvf_pdf_links if v == venue]
-                year = ",".join([y for v, y in self.soups if v == venue])
-            if not keys and year:
-                self.logd(f"Fetching page(s) for {venue.upper()}{year}")
-                self.download_cvf_page_and_update_soups(venue, year)
-                self.save_cvf_pdf_links_and_update(venue, year, self.soups[(venue, year)])
-                keys = [(v, y) for v, y in self.soups if v == venue and y == year]
-            # maybe_link = self.find_soup(keys, title)
-            maybe_link = self.find_pdf_link(keys, title)
+            maybe_link = self.cvf_helper.get_pdf_link(title, venue, year)
             if maybe_link:
                 return maybe_link
             else:
