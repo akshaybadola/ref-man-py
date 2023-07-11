@@ -46,8 +46,13 @@ def main():
                         help="Path to chrome debugger script which can validate " +
                         "Semantic Scholar Search params (optional)")
     parser.add_argument("--debug", action="store_true", help="Run in debug mode")
+    parser.add_argument("--logfile", help="Logfile for logging")
+    parser.add_argument("--logdir", type=Path, help="Directory where logfile will be stored")
+    parser.add_argument("--logfile-verbosity", type=str, default="debug",
+                        choices=["error", "info", "debug"],
+                        help="Verbosity level for logfile if given")
     parser.add_argument("--verbosity", "-v", type=str, default="info",
-                        choices=["error", "info", "debug"], help="Verbosity level")
+                        choices=["error", "info", "debug"], help="Verbosity level for stdout")
     parser.add_argument("--version", action="store_true",
                         help="Print version and exit.")
     args = parser.parse_args()
@@ -55,22 +60,27 @@ def main():
         print(f"ref-man-server version {__version__}")
         sys.exit(0)
     from .service import RefMan
-    kwargs = {"host": args.host,
-              "port": args.port,
-              "proxy_port": args.proxy_port,
-              "proxy_everything": args.proxy_everything,
-              "proxy_everything_port": args.proxy_everything_port,
-              "data_dir": args.data_dir,
-              "refs_cache_dir": args.refs_cache_dir,
-              "config_dir": Path(args.config_dir),
-              "local_pdfs_dir": args.local_pdfs_dir,
-              "remote_pdfs_dir": args.remote_pdfs_dir,
-              "remote_links_cache": args.remote_links_cache,
-              "batch_size": args.batch_size,
-              "chrome_debugger_path": args.chrome_debugger_path,
-              "debug": args.debug,
-              "verbosity": args.verbosity,
-              "threaded": args.threaded}
+    kwargs = {
+        "host": args.host,
+        "port": args.port,
+        "proxy_port": args.proxy_port,
+        "proxy_everything": args.proxy_everything,
+        "proxy_everything_port": args.proxy_everything_port,
+        "data_dir": args.data_dir,
+        "refs_cache_dir": args.refs_cache_dir,
+        "config_dir": Path(args.config_dir),
+        "local_pdfs_dir": args.local_pdfs_dir,
+        "remote_pdfs_dir": args.remote_pdfs_dir,
+        "remote_links_cache": args.remote_links_cache,
+        "batch_size": args.batch_size,
+        "chrome_debugger_path": args.chrome_debugger_path,
+        "debug": args.debug,
+        "logdir": args.logdir,
+        "logfile": args.logfile,
+        "logfile_verbosity": args.logfile_verbosity,
+        "verbosity": args.verbosity,
+        "threaded": args.threaded,
+    }
     service = RefMan(**kwargs)
     service.run()
 

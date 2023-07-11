@@ -130,3 +130,6 @@
    - Fixed a minor bug where an undefined reference to ~s2.get_corpus_id~
      existed in the service
 
+** [2023-07-11 Tue 12:59]
+   - Added logfile and associated options. Version bump 0.7.0
+

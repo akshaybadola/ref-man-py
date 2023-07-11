@@ -12,7 +12,7 @@ import psutil
 from flask import Flask, request, Response
 from werkzeug import serving
 
-from common_pyutil.log import get_stream_logger
+from common_pyutil.log import get_file_and_stream_logger, get_stream_logger
 
 from . import __version__
 from .const import default_headers
@@ -57,7 +57,9 @@ class RefMan:
                               default params are used and the user must update the params
                               in case of an error.
         debug: Whether to start the service in debug mode
-        verbosity: Verbosity control
+        logfile: Optional log file for logging
+        logfile_verbosity: logfile verbosity level
+        verbosity: stdiout verbosity level
         threaded: Start the flask server in threaded mode. Defaults to :code:`True`.
 
     :code:`remote_pdfs_dir` has to be an :code:`rclone` path and the pdf files from
@@ -68,11 +70,12 @@ class RefMan:
     #       As of now only SemanticScholar configuration is loaded if it exists
     # TODO: Also allow the user to add config options like request headers,
     #       proxy ports, data_dir etc.
-    def __init__(self, host: str, port: int, proxy_port: int, proxy_everything: bool,
+    def __init__(self, *, host: str, port: int, proxy_port: int, proxy_everything: bool,
                  proxy_everything_port: int, data_dir: Path, refs_cache_dir: Path,
                  config_dir: Path, local_pdfs_dir: Path,
                  remote_pdfs_dir: Path, remote_links_cache: Path,
                  batch_size: int, chrome_debugger_path: Path,
+                 logfile: str, logdir: Path, logfile_verbosity: str,
                  debug: bool, verbosity: str, threaded: bool):
         self.host = host
         self.port = port
@@ -92,6 +95,10 @@ class RefMan:
         self.config_file: Optional[Path] = self.config_dir.joinpath("config.json")
         self.config_file = self.config_file if self.config_file.exists() else None
         self.debug = debug
+
+        self.logfile = logfile
+        self.logdir = logdir
+        self.logfile_verbosity = logfile_verbosity
         self.verbosity = verbosity
         self.threaded = threaded
 
@@ -136,15 +143,23 @@ class RefMan:
                                 "Will not maintain remote pdf links cache.")
 
     def init_loggers(self):
-        # We set "error" to warning
         verbosity_levels = {"info", "error", "debug"}
-        if self.verbosity not in verbosity_levels:
-            self.verbosity = "info"
-            self.logger = get_stream_logger("ref_man_logger", log_level=self.verbosity)
-            self.logger.warning(f"{self.verbosity} was not in known levels. " +
-                                f"Set to {self.verbosity}")
+        self.verbosity = (self.verbosity in verbosity_levels and self.verbosity) or "info"
+        self.logfile_verbosity = (self.logfile_verbosity in verbosity_levels and
+                                  self.logfile_verbosity) or "debug"
+        if self.logdir and self.logfile:
+            _, self.logger = get_file_and_stream_logger(logger_name="ref-man",
+                                                        logdir=str(self.logdir.absolute()),
+                                                        log_file_name=self.logfile,
+                                                        new_file=False,
+                                                        file_log_level=self.logfile_verbosity,
+                                                        stream_log_level=self.verbosity,
+                                                        logger_level="debug")
+            self.logger.info(f"Log file is {self.logdir}/{self.logfile}")
+            self.logger.debug(f"File log level is set to {self.logfile_verbosity}")
+            self.logger.debug(f"Stream log level is set to {self.verbosity}")
         else:
-            self.logger = get_stream_logger("ref_man_logger", log_level=self.verbosity)
+            self.logger = get_stream_logger("ref-man", log_level=self.verbosity)
             self.logger.debug(f"Log level is set to {self.verbosity}.")
 
     def logi(self, msg: str) -> str:

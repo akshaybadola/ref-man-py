@@ -1,5 +1,6 @@
 from typing import List, Dict, Union, Optional
 from pathlib import Path
+from urllib import parse
 import json
 from subprocess import Popen, PIPE
 import shlex
@@ -11,7 +12,7 @@ class SemanticSearch:
     # Example params:
     #
     # {'queryString': '', 'page': 1, 'pageSize': 10, 'sort': 'relevance',
-    #  'authors': [], 'coAuthors': [], 'venues': [], 'yearFilter': None,
+    #  'authors': [], 'coAuthors': [], 'venues': [], 'year_filter': None,
     #  'requireViewablePdf': False, 'publicationTypes': [], 'externalContentTypes': [],
     #  'fieldsOfStudy': ['computer-science'], 'useFallbackRankerService': False,
     #  'useFallbackSearchCluster': False, 'hydrateWithDdb': True, 'includeTldrs': False,
@@ -29,11 +30,16 @@ class SemanticSearch:
     """
     def __init__(self, debugger_path: Optional[Path]):
         self.params_file = Path(__file__).parent.joinpath("ss_default.json")
+        self.headers_file = Path(__file__).parent.joinpath("headers_default.json")
         with open(self.params_file) as f:
             self.default_params = json.load(f)
         self.params = self.default_params.copy()
         if debugger_path and debugger_path.exists():
             self.update_params(debugger_path)
+        with open(self.headers_file) as f:
+            self.headers = json.load(f)
+        self.root_url = "https://www.semanticscholar.org/"
+        self.search_url = parse.urljoin(self.root_url, "api/1/search")
 
     def update_params(self, debugger_path: Path) -> None:
         """Update the parameters for Semantic Scholar Search if possible
@@ -119,12 +125,12 @@ class SemanticSearch:
         params = self.params.copy()
         params["queryString"] = query
         if 'yearFilter' in kwargs:
-            yearFilter = kwargs['yearFilter']
-            if yearFilter and not ("min" in yearFilter and "max" in yearFilter and
-                                   yearFilter["max"] > yearFilter["min"]):
+            year_filter = kwargs['yearFilter']
+            if year_filter and not ("min" in year_filter and "max" in year_filter and
+                                    year_filter["max"] > year_filter["min"]):
                 print("Invalid Year Filter. Disabling.")
-                yearFilter = None
-            params['yearFilter'] = yearFilter
+                year_filter = None
+            params['yearFilter'] = year_filter
         if cs_only:
             params['fieldsOfStudy'] = ['computer-science']
         else:
@@ -132,14 +138,16 @@ class SemanticSearch:
         for k, v in kwargs.items():
             if k in params and isinstance(v, type(params[k])):
                 params[k] = v
-        headers = {'User-agent': 'Mozilla/5.0', 'Origin': 'https://www.semanticscholar.org'}
-        print("Sending request to semanticscholar search with query" +
-              f": {query} and params {self.params}")
+        headers = {"referer": f"{self.root_url}/search?q={parse.quote(query)}&sort=relevance",
+                   **self.headers}
+        print(f"Sending request to semanticscholar search with query: {query},"
+              f" params {params}, headers {headers}")
         response = requests.post("https://www.semanticscholar.org/api/1/search",
                                  headers=headers, json=params)
         if response.status_code == 200:
             results = json.loads(response.content)["results"]
             print(f"Got {len(results)} results for query: {query}")
-            return response.content  # already json
+            # already json
+            return response.content  # type: ignore
         else:
             return json.dumps({"error": f"ERROR for {query}, {str(response.content)}"})
