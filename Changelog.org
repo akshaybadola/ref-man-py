@@ -133,3 +133,8 @@
 ** [2023-07-11 Tue 12:59]
    - Added logfile and associated options. Version bump 0.7.0
 
+** [2023-07-20 Thu 10:17]
+   - Added experimental internal log.py
+   - Don't use refs_cache if the path doesn't exist
+   - Use semantic scholar graph api search by default and fixed search query bug
+

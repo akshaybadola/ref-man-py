@@ -1,24 +1,28 @@
 from typing import List, Dict, Optional, Union, Tuple, Any, Callable, cast
 import os
+import re
 import json
 import math
 import time
 import random
-import requests
+import logging
 from pathlib import Path
 import asyncio
+
 import sys
 if sys.version_info.minor > 7:
     from typing import TypedDict
 else:
     from typing_extensions import TypedDict
 
+import requests
 import aiohttp
 from common_pyutil.monitor import Timer
 
 from .filters import (year_filter, author_filter, num_citing_filter,
                       num_influential_count_filter, venue_filter, title_filter)
 from .data import CitationsCache
+from .log import info, debug, warn, error
 
 
 timer = Timer()
@@ -128,6 +132,7 @@ class SemanticScholar:
 
     def __init__(self, config_file=None, cache_dir=None, refs_cache_dir=None):
         self.load_config(config_file)
+        self.logger = logging.getLogger("ref-man")
         self._api_key = self._config.get("api_key", None)
         self._root_url = "https://api.semanticscholar.org/graph/v1"
         self._cache_dir = Path(cache_dir or self._config.get("cache", None))
@@ -153,10 +158,11 @@ class SemanticScholar:
 
     def load_refs_cache(self):
         if self._refs_cache_dir and Path(self._refs_cache_dir).exists():
-            self._refs_cache = CitationsCache(self._refs_cache_dir)
-            print(f"Loaded Full Semantic Scholar Citations Cache from {self._refs_cache_dir}")
+            self._refs_cache: CitationsCache | None = CitationsCache(self._refs_cache_dir)
+            self.logger.debug(f"Loaded Full Semantic Scholar Citations Cache from {self._refs_cache_dir}")
         else:
             self._refs_cache = None
+            self.logger.debug("Refs Cache doesn't exist, not loading")
 
     def id_types(self, id_type: str):
         return "CorpusId" if id_type.lower() == "corpusid" else id_type.upper()
@@ -780,7 +786,7 @@ class SemanticScholar:
             return None
         else:
             cite_count = data["details"]["citationCount"]
-            if offset+limit > 10000:
+            if offset+limit > 10000 and self._refs_cache is not None:
                 corpus_id = get_corpus_id(data["details"])
                 if corpus_id:
                     citations = self._build_citations_from_stored_data(
@@ -918,7 +924,7 @@ class SemanticScholar:
                                           existing_ids: Optional[List[int]],
                                           cite_count: int,
                                           offset: int = 0,
-                                          limit: int = 0) -> CitationsType:
+                                          limit: int = 0) -> Optional[CitationsType]:
         """Build the citations data for a paper entry from cached data
 
         Args:
@@ -926,33 +932,37 @@ class SemanticScholar:
 
         """
 
-        refs_ids = self._refs_cache.get_citations(int(corpus_id))
-        if not refs_ids:
-            raise AttributeError(f"Not found for {corpus_id}")
-        if not existing_ids:
-            existing_ids = []
-        if existing_ids:
-            need_ids = list(refs_ids - set(existing_ids))
+        if self._refs_cache is not None:
+            refs_ids = self._refs_cache.get_citations(int(corpus_id))
+            if not refs_ids:
+                raise AttributeError(f"Not found for {corpus_id}")
+            if not existing_ids:
+                existing_ids = []
+            if existing_ids:
+                need_ids = list(refs_ids - set(existing_ids))
+            else:
+                need_ids = list(refs_ids)
+            if not limit:
+                limit = len(need_ids)
+            cite_gap = cite_count - len(need_ids) - len(existing_ids)
+            if cite_gap:
+                print(f"WARNING: {cite_gap} citations cannot be fetched.\n"
+                      "You have stale SS data")
+            need_ids = need_ids[offset:offset+limit]
+            # Remove contexts as that's not available in paper details
+            fields = ",".join(self._config["citations"]["fields"]).replace(",contexts", "")
+            urls = [f"{self._root_url}/paper/CorpusID:{ID}?fields={fields}"
+                    for ID in need_ids]
+            citations = {"offset": 0, "data": []}
+            batch_size = self._batch_size
+            result = self._get_some_urls_in_batches(urls, batch_size)
+            citations["data"] = [{"citingPaper": x, "contexts": []} for x in result]
+            return citations        # type: ignore
         else:
-            need_ids = list(refs_ids)
-        if not limit:
-            limit = len(need_ids)
-        cite_gap = cite_count - len(need_ids) - len(existing_ids)
-        if cite_gap:
-            print(f"WARNING: {cite_gap} citations cannot be fetched.\n"
-                  "You have stale SS data")
-        need_ids = need_ids[offset:offset+limit]
-        # Remove contexts as that's not available in paper details
-        fields = ",".join(self._config["citations"]["fields"]).replace(",contexts", "")
-        urls = [f"{self._root_url}/paper/CorpusID:{ID}?fields={fields}"
-                for ID in need_ids]
-        citations = {"offset": 0, "data": []}
-        batch_size = self._batch_size
-        result = self._get_some_urls_in_batches(urls, batch_size)
-        citations["data"] = [{"citingPaper": x, "contexts": []} for x in result]
-        return citations        # type: ignore
+            self.logger.error("References Cache not present")
+            return None
 
-    def _fetch_citations_greater_than_10000(self, existing_data):
+    def _maybe_fetch_citations_greater_than_10000(self, existing_data):
         """Fetch citations when their number is > 10000.
 
         SemanticScholar doesn't allow above 10000, so we have to build that
@@ -962,6 +972,8 @@ class SemanticScholar:
             existing_data: Existing paper details data
 
         """
+        if self._refs_cache is None:
+            return None
         cite_count = len(existing_data["citations"]["data"])
         existing_corpus_ids = [get_corpus_id(x) for x in existing_data["citations"]["data"]]
         if -1 in existing_corpus_ids:
@@ -1026,7 +1038,7 @@ class SemanticScholar:
                           " new citations")
                     update = True
                 if cite_count > 10000:
-                    _update = self._fetch_citations_greater_than_10000(existing_data)
+                    _update = self._maybe_fetch_citations_greater_than_10000(existing_data)
                     update = update or _update
                 if update:
                     self._dump(ID, existing_data)
@@ -1079,12 +1091,14 @@ class SemanticScholar:
             query: query to search
 
         """
-        terms = "+".join(query.split(" "))
+        terms = "+".join(re.sub(r"[^a-z0-9]", " ", query, flags=re.IGNORECASE).split(" "))
         fields = ",".join(self._config["search"]["fields"])
         limit = self._config["search"]["limit"]
         url = f"{self._root_url}/paper/search?query={terms}&fields={fields}&limit={limit}"
         response = self._get(url)
+        debug(f"Searching for {query}")
         if response.status_code == 200:
-            return response.content
+            debug(f"Got some results for {query}")
+            return response.content  # type: ignore
         else:
             return json.dumps({"error": json.loads(response.content)})
