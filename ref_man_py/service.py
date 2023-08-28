@@ -1,4 +1,4 @@
-from typing import List, Dict, Optional, Tuple, Union
+from typing import Optional
 import json
 import os
 import time
@@ -14,6 +14,9 @@ from werkzeug import serving
 
 from common_pyutil.log import get_file_and_stream_logger, get_stream_logger
 
+from s2cache import SemanticScholar
+from s2cache.util import dumps_json
+
 from . import __version__
 from .const import default_headers
 from .util import (fetch_url_info, fetch_url_info_parallel,
@@ -21,9 +24,7 @@ from .util import (fetch_url_info, fetch_url_info_parallel,
 from .arxiv import arxiv_get, arxiv_fetch, arxiv_helper
 from .dblp import dblp_helper
 from .cvf import CVF
-from .semantic_scholar import SemanticScholar
-from .semantic_search import SemanticSearch
-from .cache import CacheHelper
+from .pdf_cache import PDFCache
 
 
 app = Flask("RefMan")
@@ -45,17 +46,12 @@ class RefMan:
         data_dir: Directory where the Semantic Scholar Cache is stored.
                   See :func:`load_ss_cache`
         config_dir: Directory to store configuration related files
-        refs_cache_dir: Directory of Semantic Scholar References Cache
+        corpus_cache_dir: Directory of Semantic Scholar Citations Corpus
         local_pdfs_dir: Local directory where the pdf files are stored.
         remote_pdfs_dir: Remote directory where the pdf files are stored.
         remote_links_cache: File mapping local pdfs to remote links.
         batch_size: Number of parallel requests to send in case parallel requests is
                     implemented for that method.
-        chrome_debugger_path: Path for the chrome debugger script.
-                              Used to validate the Semantic Scholar search api, as
-                              the params can change sometimes. If it's not given then
-                              default params are used and the user must update the params
-                              in case of an error.
         debug: Whether to start the service in debug mode
         logfile: Optional log file for logging
         logfile_verbosity: logfile verbosity level
@@ -71,28 +67,26 @@ class RefMan:
     # TODO: Also allow the user to add config options like request headers,
     #       proxy ports, data_dir etc.
     def __init__(self, *, host: str, port: int, proxy_port: int, proxy_everything: bool,
-                 proxy_everything_port: int, data_dir: Path, refs_cache_dir: Path,
+                 proxy_everything_port: int, data_dir: Path, corpus_cache_dir: Path,
                  config_dir: Path, local_pdfs_dir: Path,
                  remote_pdfs_dir: Path, remote_links_cache: Path,
-                 batch_size: int, chrome_debugger_path: Path,
-                 logfile: str, logdir: Path, logfile_verbosity: str,
+                 batch_size: int, logfile: str, logdir: Path, logfile_verbosity: str,
                  debug: bool, verbosity: str, threaded: bool):
         self.host = host
         self.port = port
         self.batch_size = batch_size
         self.data_dir = data_dir
         self.config_dir = config_dir
-        self.refs_cache_dir = refs_cache_dir
+        self.corpus_cache_dir = corpus_cache_dir
         self.local_pdfs_dir = local_pdfs_dir
         self.remote_pdfs_dir = remote_pdfs_dir
         self.remote_links_cache = remote_links_cache
-        self.proxy_port = proxy_port
-        self.proxy_everything = proxy_everything
-        self.proxy_everything_port = proxy_everything_port
-        self.chrome_debugger_path = Path(chrome_debugger_path) if chrome_debugger_path else None
+        self.proxy_port: Optional[int] = proxy_port
+        self.proxy_everything: Optional[int] = proxy_everything
+        self.proxy_everything_port: Optional[int] = proxy_everything_port
         if not self.config_dir.exists():
             os.makedirs(self.config_dir)
-        self.config_file: Optional[Path] = self.config_dir.joinpath("config.json")
+        self.config_file: Optional[Path] = self.config_dir.joinpath("config.yaml")
         self.config_file = self.config_file if self.config_file.exists() else None
         self.debug = debug
 
@@ -101,15 +95,16 @@ class RefMan:
         self.logfile_verbosity = logfile_verbosity
         self.verbosity = verbosity
         self.threaded = threaded
-
         self._requests_timeout = 60
 
         self.init_loggers()
         if self.config_file:
             self.logi(f"Loaded config file {self.config_file}")
 
-        self.s2 = SemanticScholar(config_file=self.config_file, cache_dir=self.data_dir,
-                                  refs_cache_dir=self.refs_cache_dir)
+        self.s2 = SemanticScholar(config_file=self.config_file,
+                                  cache_dir=self.data_dir,
+                                  corpus_cache_dir=self.corpus_cache_dir,
+                                  logger_name="ref-man")
         self.init_remote_cache()
 
         self.cvf_helper = CVF(self.config_dir, self.logger)
@@ -117,9 +112,6 @@ class RefMan:
         # NOTE: Checks only once for the proxy, see util.check_proxy
         #       for a persistent solution
         self.check_proxies()
-        # NOTE: Although this is still use here, SS may phase it out
-        #       in favour of the graph/search
-        self.semantic_search = SemanticSearch(self.chrome_debugger_path)
         self._app = app
         self.init_routes()
 
@@ -134,8 +126,8 @@ class RefMan:
         """
         self.update_cache_run = None
         if self.local_pdfs_dir and self.remote_pdfs_dir and self.remote_links_cache:
-            self.pdf_cache_helper: Optional[CacheHelper] =\
-                CacheHelper(self.local_pdfs_dir, Path(self.remote_pdfs_dir),
+            self.pdf_cache_helper: Optional[PDFCache] =\
+                PDFCache(self.local_pdfs_dir, Path(self.remote_pdfs_dir),
                             Path(self.remote_links_cache), self.logger)
         else:
             self.pdf_cache_helper = None
@@ -186,7 +178,7 @@ class RefMan:
         proxy server that connects to the network of your institute.
 
         """
-        msgs: List[str] = []
+        msgs: list[str] = []
         self.proxies = None
         self.everything_proxies = None
         if self.proxy_everything_port:
@@ -231,7 +223,7 @@ class RefMan:
         def s2_paper():
             if request.method == "GET":
                 if "id" in request.args:
-                    id = request.args["id"]
+                    ID = request.args["id"]
                 else:
                     return json.dumps("NO ID GIVEN")
                 if "id_type" in request.args:
@@ -239,48 +231,38 @@ class RefMan:
                 else:
                     return json.dumps("NO ID_TYPE GIVEN")
                 force = True if "force" in request.args else False
-                all_data = True if "all" in request.args else False
-                data = self.s2.get_details_for_id(id_type, id, force, all_data)
-                return json.dumps(data)
+                paper_data = True if "paper_data" in request.args else False
+                data = self.s2.get_details_for_id(id_type, ID, force, paper_data)
+                return dumps_json(data)
             else:
                 return json.dumps("METHOD NOT IMPLEMENTED")
 
         @app.route("/s2_corpus_id", methods=["GET"])
         def s2_corpus_id():
             if "id" in request.args:
-                id = request.args["id"]
+                ID = request.args["id"]
             else:
                 return json.dumps("NO ID GIVEN")
             if "id_type" in request.args:
                 id_type = request.args["id_type"]
             else:
                 return json.dumps("NO ID_TYPE GIVEN")
-            data = self.s2.id_to_corpus_id(id_type, id)
-            return json.dumps(data)
+            data = self.s2.id_to_corpus_id(id_type, ID)
+            return dumps_json(data)
 
         @app.route("/s2_config", methods=["GET"])
         def s2_config():
             return json.dumps(self.s2._config)
 
         @app.route("/s2_details/<ssid>", methods=["GET"])
-        def s2_details(ssid: str) -> Union[str, bytes]:
+        def s2_details(ssid: str) -> str | bytes:
             if "force" in request.args:
                 force = True
             else:
                 force = False
-            return json.dumps(self.s2.details(ssid, force))
+            return dumps_json(self.s2.paper_details(ssid, force=force))
 
-        @app.route("/s2_all_details/<ssid>", methods=["GET", "POST"])
-        def s2_all_details(ssid: str) -> Union[str, bytes]:
-            """Get paper, metadata, references and ALL citations for SSID."""
-            if "force" in request.args:
-                print("Force not supported with s2_all_details")
-            if request.method == "GET":
-                return json.dumps(self.s2.details(ssid, all_data=True))
-            else:
-                return json.dumps("METHOD NOT IMPLEMENTED")
-
-        def s2_citations_references_subr(request, ssid: str, key) -> Union[str, bytes]:
+        def s2_citations_references_subr(request, ssid: str, key) -> str | bytes:
             """Get requested citations or references for a paper.
 
             TODO: describe the filters and count mechanism
@@ -302,8 +284,8 @@ class RefMan:
             if request.method == "GET":
                 if "filters" in request.args:
                     return json.dumps("FILTERS NOT SUPPORTED WITH GET")
-                values = func(ssid, offset=offset, count=count)  # type: ignore
-                return json.dumps(values)
+                values = func(ssid, offset=offset, limit=count)  # type: ignore
+                return dumps_json(values)
             else:
                 if self.debug and hasattr(request, "json"):
                     print("REQUEST JSON", request.json)
@@ -314,10 +296,10 @@ class RefMan:
                     filters = data["filters"]
                     func = self.s2.filter_citations if key == "citations" else\
                         self.s2.filter_references
-                    return json.dumps(func(ssid, filters, count))
+                    return dumps_json(func(ssid, filters=filters, num=count))
 
         @app.route("/s2_citations/<ssid>", methods=["GET", "POST"])
-        def s2_citations(ssid: str) -> Union[str, bytes]:
+        def s2_citations(ssid: str) -> str | bytes:
             """Get the citations for a paper from S2 graph api.
 
             Requires an :code:`ssid` for the paper. Optional :code:`count` and
@@ -329,7 +311,7 @@ class RefMan:
             return s2_citations_references_subr(request, ssid, "citations")
 
         @app.route("/s2_references/<ssid>", methods=["GET", "POST"])
-        def s2_references(ssid: str) -> Union[str, bytes]:
+        def s2_references(ssid: str) -> str | bytes:
             """Get the references for a paper from S2 graph api.
 
             Requires an :code:`ssid` for the paper. Optional :code:`count` and
@@ -341,7 +323,7 @@ class RefMan:
             return s2_citations_references_subr(request, ssid, "references")
 
         @app.route("/s2_next_citations/<ssid>", methods=["GET", "POST"])
-        def s2_next_citations(ssid: str) -> Union[str, bytes]:
+        def s2_next_citations(ssid: str) -> str | bytes:
             """Get the next citations from S2 graph api.
 
             See :meth:`SemanticScholar.next_citations` for implementation details.
@@ -355,7 +337,7 @@ class RefMan:
                         json.dumps("MAX 10000 CITATIONS CAN BE FETCHED AT ONCE.")
                 else:
                     count = 0
-                return json.dumps(self.s2.next_citations(ssid, count))
+                return dumps_json(self.s2.next_citations(ssid, count))
             else:
                 # TODO: Not Implemented yet
                 return json.dumps("METHOD NOT IMPLEMENTED")
@@ -389,8 +371,8 @@ class RefMan:
                 return self.s2.recommendations(paperid, [], count)
             else:
                 data = request.json
-                pos_ids = data.get("pos-ids", None)
-                neg_ids = data.get("neg-ids", None)
+                pos_ids = data and data.get("pos-ids", None)
+                neg_ids = data and data.get("neg-ids", None)
                 if not pos_ids:
                     return json.dumps("pos-ids not given")
                 if not neg_ids:
@@ -408,24 +390,6 @@ class RefMan:
                 return self.s2.search(query)
             else:
                 return json.dumps("METHOD NOT IMPLEMENTED")
-
-        @app.route("/semantic_scholar_search", methods=["GET", "POST"])
-        def ss_search():
-            """Search Semantic Scholar for a query string.
-
-            This is different than graph api requests."""
-            if "q" in request.args and request.args["q"]:
-                query = request.args["q"]
-            else:
-                return json.dumps("NO QUERY GIVEN or EMPTY QUERY")
-            if request.method == "GET":
-                return self.semantic_search.semantic_scholar_search(query)
-            else:
-                if request.json:
-                    kwargs = request.json
-                else:
-                    kwargs = {}
-                return self.semantic_search.semantic_scholar_search(query, **kwargs)
 
         @app.route("/url_info", methods=["GET"])
         def url_info() -> str:
@@ -452,10 +416,12 @@ class RefMan:
         def set_proxy():
             """Set or unset proxy port"""
             if request.args.get("set"):
-                if request.args.get("proxy_port"):
-                    self.proxy_port = request.args.get("proxy_port")
-                if request.args.get("proxy_everything_port"):
-                    self.proxy_everything_port = request.args.get("proxy_everything_port")
+                temp = request.args.get("proxy_port", None)
+                if temp is not None:
+                    self.proxy_port = int(temp)
+                temp = request.args.get("proxy_port", None)
+                if temp:
+                    self.proxy_everything_port = int(temp)
                 return self.check_proxies()
             elif request.args.get("unset"):
                 self.proxy_port = None

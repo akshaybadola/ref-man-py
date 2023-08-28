@@ -71,5 +71,7 @@
 * License
 
   All the code in this repo except for external services and libraries are
-  licensed under AGPL 3.0 (or later). See LICENSE.md in this repo. To learn more
-  about AGPL see https://www.gnu.org/licenses/agpl-3.0.en.html.
+  licensed under the MIT License. See ~LICENSE.md~ in this repo.
+
+  Some commits in the repository may be under a different license. If you use
+  those, you would have see the details of that License.

@@ -8,7 +8,7 @@ from subprocess import Popen, PIPE, TimeoutExpired
 from threading import Thread, Event
 
 
-class CacheHelper:
+class PDFCache:
     """A local and remote (via :code:`rclone`) PDF files manager
 
        The pdf files are linked to publications and be stored in any `rclone`
