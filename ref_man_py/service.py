@@ -5,6 +5,7 @@ import time
 from pathlib import Path
 from threading import Thread
 from multiprocessing import Process
+import dataclasses
 
 import yaml
 import requests
@@ -233,7 +234,8 @@ class RefMan:
                 force = True if "force" in request.args else False
                 paper_data = True if "paper_data" in request.args else False
                 data = self.s2.get_details_for_id(id_type, ID, force, paper_data)
-                return dumps_json(data)
+                return dumps_json({k: v for k, v in dataclasses.asdict(data).items()
+                                   if v is not None})
             else:
                 return json.dumps("METHOD NOT IMPLEMENTED")
 
@@ -614,7 +616,7 @@ class RefMan:
         "Run the server"
         if self.debug:
             self.logd(f"Started Ref Man Service version {__version__} in debug mode")
-            serving.run_simple(self.host, self.port, app, self.threaded)
+            serving.run_simple(self.host, self.port, app, threaded=False)
             self.proc = None
         else:
             self.logd(f"Started Ref Man Service version {__version__}")
