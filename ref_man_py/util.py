@@ -6,17 +6,54 @@ import re
 import requests
 import time
 import logging
+import dataclasses
+import copy
 
 from bs4 import BeautifulSoup
 import flask
+
 from common_pyutil.proc import call
+from common_pyutil.functional import lens
+from s2cache.util import dumps_json
+
+from s2cache.models import PaperData, PaperDetails, Citation, Error
 
 from .const import default_headers
 from .q_helper import ContentType
 
 
+def is_error(x):
+    if isinstance(x, Error):
+        return True
+
+
+def dumps_data_or_error(data: PaperDetails | PaperData | Error) -> str:
+    if is_error(data):
+        return dumps_json(data)
+    else:
+        return dumps_json({k: v for k, v in dataclasses.asdict(data).items()
+                           if v is not None})
+
+
+def filter_fields(data, fields):
+    if dataclasses.is_dataclass(data):
+        _data = dataclasses.asdict(data)
+    else:
+        _data = copy.deepcopy(data)
+    if not _data:
+        import ipdb; ipdb.set_trace()
+    for k in _data:
+        if k not in fields:
+            _data[k] = None
+        else:
+            v = fields[k]
+            if isinstance(v, list):
+                _data[k] = lens(_data, *v)
+    return _data
+
+
 def check_proxy_port(proxy_port: int, proxy_name: str,
-                       logger: logging.Logger) ->\
+                     logger: logging.Logger) ->\
         Tuple[bool, str, Dict[str, str]]:
     status = False
     proxies = {"http": f"http://127.0.0.1:{proxy_port}",

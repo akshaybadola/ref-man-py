@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Optional, cast
 import json
 import os
 import time
@@ -16,12 +16,15 @@ from werkzeug import serving
 from common_pyutil.log import get_file_and_stream_logger, get_stream_logger
 
 from s2cache import SemanticScholar
+from s2cache.models import PaperData, PaperDetails, Citation, Error, References, Citations
 from s2cache.util import dumps_json
 
 from . import __version__
 from .const import default_headers
 from .util import (fetch_url_info, fetch_url_info_parallel,
-                   parallel_fetch, post_json_wrapper, check_proxy_port)
+                   parallel_fetch, post_json_wrapper, check_proxy_port,
+                   filter_fields, dumps_data_or_error)
+from .config import Config, default_fields
 from .arxiv import arxiv_get, arxiv_fetch, arxiv_helper
 from .dblp import dblp_helper
 from .cvf import CVF
@@ -87,8 +90,6 @@ class RefMan:
         self.proxy_everything_port: Optional[int] = proxy_everything_port
         if not self.config_dir.exists():
             os.makedirs(self.config_dir)
-        self.config_file: Optional[Path] = self.config_dir.joinpath("config.yaml")
-        self.config_file = self.config_file if self.config_file.exists() else None
         self.debug = debug
 
         self.logfile = logfile
@@ -98,15 +99,10 @@ class RefMan:
         self.threaded = threaded
         self._requests_timeout = 60
 
-        self.init_loggers()
-        if self.config_file:
-            self.logi(f"Loaded config file {self.config_file}")
-
-        self.s2 = SemanticScholar(config_file=self.config_file,
-                                  cache_dir=self.data_dir,
-                                  corpus_cache_dir=self.corpus_cache_dir,
-                                  logger_name="ref-man")
-        self.init_remote_cache()
+        self._init_loggers()
+        self._init_config()
+        self._init_s2_and_fields()
+        self._init_remote_cache()
 
         self.cvf_helper = CVF(self.config_dir, self.logger)
 
@@ -116,10 +112,94 @@ class RefMan:
         self._app = app
         self.init_routes()
 
+    def _init_config(self):
+        self.config_file: Optional[Path] = self.config_dir.joinpath("config.yaml")
+        self.config_file = self.config_file if self.config_file.exists() else None
+        if self.config_file:
+            self.logi(f"Loaded config file {self.config_file}")
+            with open(self.config_file) as f:
+                _config = yaml.load(f, Loader=yaml.SafeLoader)
+        else:
+            _config = {"data": default_fields()}
+        self.config = Config(**_config)
+
+    def _init_s2_and_fields(self):
+        self.s2 = SemanticScholar(config_or_file=self.config.s2,
+                                  cache_dir=self.data_dir,
+                                  corpus_cache_dir=self.corpus_cache_dir,
+                                  logger_name="ref-man")
+        # fields are which are filtered and sent to interface.
+        # Determined via config
+        self._paper_fields = {x[0] if isinstance(x, list) else x: x
+                              for x in self.config.data.details.fields}
+        self._paper_fields.update({"references": "references",
+                                   "citations": "citations"})
+        self._search_fields = {x[0] if isinstance(x, list) else x: x
+                               for x in self.config.data.search.fields}
+        self._search_fields.update({"references": "references",
+                                    "citations": "citations"})
+        self._references_fields = {x[0] if isinstance(x, list) else x: x
+                                   for x in self.config.data.references.fields}
+        self._citations_fields = {x[0] if isinstance(x, list) else x: x
+                                  for x in self.config.data.citations.fields}
+
     def _get(self, url: str, **kwargs) -> requests.Response:
         return requests.get(url, timeout=self._requests_timeout, **kwargs)
 
-    def init_remote_cache(self):
+
+    def _filter_paper_subr(self, fields: dict):
+        paper_fields = fields.get("paper_fields", self._paper_fields)
+        citations_fields = fields.get("citations_fields", self._citations_fields)
+        references_fields = fields.get("references_fields", self._references_fields)
+        return fields, paper_fields, citations_fields, references_fields
+
+    def _filter_paper_details(self, data: PaperDetails, fields: dict)\
+            -> PaperDetails:
+        fields, paper_fields, citations_fields, references_fields =\
+            self._filter_paper_subr(fields)
+        if dataclasses.is_dataclass(data):
+            _data = dataclasses.asdict(data)
+            _data = filter_fields(_data, paper_fields)
+            data = PaperDetails(**_data)
+            if citations_fields != "all":
+                data.citations = [filter_fields(x, citations_fields)
+                                  for x in data.citations]
+            if references_fields != "all":
+                data.references = [filter_fields(x, references_fields)
+                                   for x in data.references]
+            return data
+        else:
+            raise TypeError("data should be a dataclass")
+
+    def _filter_paper_data(self, data: PaperData, fields: dict)\
+            -> PaperData:
+        """Filter allowed fields and apply count limits to S2 data citations and references
+
+        Args:
+            data: S2 Data
+
+        Limits are defined in configuration
+
+        """
+        fields, paper_fields, citations_fields, references_fields =\
+            self._filter_paper_subr(fields)
+        if dataclasses.is_dataclass(data):
+            if paper_fields != "all":
+                _details = filter_fields(data.details, paper_fields)
+                data.details = PaperDetails(**_details)
+            data.citations.data = [x for x in data.citations.data if x["citingPaper"]]
+            data.references.data = [x for x in data.references.data if x["citedPaper"]]
+            if citations_fields != "all":
+                for i, x in enumerate(data.citations.data):
+                    data.citations.data[i]["citingPaper"] = filter_fields(x["citingPaper"], citations_fields)
+            if references_fields != "all":
+                for i, y in enumerate(data.references.data):
+                    data.references.data[i]["citedPaper"] = filter_fields(y["citedPaper"], references_fields)
+            return data
+        else:
+            raise TypeError("data should be a dataclass")
+
+    def _init_remote_cache(self):
         """Initialize cache (and map) of remote and local pdf files.
 
         The files can be synced from and to an :code:`rclone` remote.
@@ -129,13 +209,13 @@ class RefMan:
         if self.local_pdfs_dir and self.remote_pdfs_dir and self.remote_links_cache:
             self.pdf_cache_helper: Optional[PDFCache] =\
                 PDFCache(self.local_pdfs_dir, Path(self.remote_pdfs_dir),
-                            Path(self.remote_links_cache), self.logger)
+                         Path(self.remote_links_cache), self.logger)
         else:
             self.pdf_cache_helper = None
             self.logger.warning("All arguments required for pdf cache not given.\n"
                                 "Will not maintain remote pdf links cache.")
 
-    def init_loggers(self):
+    def _init_loggers(self):
         verbosity_levels = {"info", "error", "debug"}
         self.verbosity = (self.verbosity in verbosity_levels and self.verbosity) or "info"
         self.logfile_verbosity = (self.logfile_verbosity in verbosity_levels and
@@ -207,6 +287,22 @@ class RefMan:
     # TODO: This entire method should be rewritten so that the functions are
     #       outside. This just grew out of nowhere LOL (not really but...)
     def init_routes(self):
+        def filter_paper_and_dump(data: Error | PaperData | PaperDetails, request) -> str:
+            if isinstance(data, Error):
+                return dumps_json(data)
+            if request.method == "POST":
+                post_data = request.json
+                if not post_data:
+                    return "ERROR"
+                fields = post_data.get("fields", {})
+            else:
+                fields = {}
+            if isinstance(data, PaperData):
+                data = self._filter_paper_data(data, fields)
+            else:
+                data = self._filter_paper_details(data, fields)
+            return dumps_data_or_error(data)
+
         @app.route("/arxiv", methods=["GET", "POST"])
         def arxiv():
             if request.method == "GET":
@@ -221,23 +317,33 @@ class RefMan:
                 return json.dumps(result)
 
         @app.route("/s2_paper", methods=["GET", "POST"])
-        def s2_paper():
-            if request.method == "GET":
-                if "id" in request.args:
-                    ID = request.args["id"]
-                else:
-                    return json.dumps("NO ID GIVEN")
-                if "id_type" in request.args:
-                    id_type = request.args["id_type"]
-                else:
-                    return json.dumps("NO ID_TYPE GIVEN")
-                force = True if "force" in request.args else False
-                paper_data = True if "paper_data" in request.args else False
-                data = self.s2.get_details_for_id(id_type, ID, force, paper_data)
-                return dumps_json({k: v for k, v in dataclasses.asdict(data).items()
-                                   if v is not None})
+        def s2_paper() -> str:
+            if "id" in request.args:
+                ID = request.args["id"]
             else:
-                return json.dumps("METHOD NOT IMPLEMENTED")
+                return json.dumps("NO ID GIVEN")
+            if "id_type" in request.args:
+                id_type = request.args["id_type"]
+            else:
+                return json.dumps("NO ID_TYPE GIVEN")
+            force = bool(request.args.get("force", False))
+            paper_data = bool(request.args.get("paper_data", False))
+            if paper_data:
+                data: Error | PaperData | PaperDetails = self.s2.get_data_for_id(id_type, ID, force)
+            else:
+                data = self.s2.get_details_for_id(id_type, ID, force)
+            return filter_paper_and_dump(data, request)
+
+        @app.route("/s2_get_updated_paper", methods=["GET"])
+        def s2_update_paper():
+            ID = request.args.get("id", None)
+            if not ID:
+                return json.dumps("NO ID GIVEN")
+            keys = request.args.get("keys", None)
+            if not keys:
+                return json.dumps("NO KEYS TO UPDATE GIVEN")
+            data = self.s2.update_and_fetch_paper(ID, keys.split(","))
+            return filter_paper_and_dump(data, request)
 
         @app.route("/s2_corpus_id", methods=["GET"])
         def s2_corpus_id():
@@ -254,7 +360,7 @@ class RefMan:
 
         @app.route("/s2_config", methods=["GET"])
         def s2_config():
-            return json.dumps(self.s2._config)
+            return dumps_json(self.s2._config)
 
         @app.route("/s2_details/<ssid>", methods=["GET"])
         def s2_details(ssid: str) -> str | bytes:
@@ -262,7 +368,31 @@ class RefMan:
                 force = True
             else:
                 force = False
-            return dumps_json(self.s2.paper_details(ssid, force=force))
+            details = self.s2.paper_details(ssid, force=force)
+            if isinstance(details, Error):
+                return dumps_json(details)
+            details = self._filter_paper_details(details, {})
+            return dumps_data_or_error(details)
+
+        @app.route("/ensure_citations/<ssid>", methods=["POST"])
+        def s2_ensure_citations(ssid: str) -> str | bytes:
+            if "force" in request.args:
+                force = True
+            else:
+                force = False
+            details = self.s2.paper_details(ssid, force=force)
+            if isinstance(details, Error):
+                return dumps_json(details)
+            details = self._filter_paper_details(details, {})
+            return dumps_data_or_error(details)
+
+        def filter_subr(values, key, fields):
+            citetype = "citedPaper" if key == "references" else "citingPaper"
+            if isinstance(values, (References, Citations)):
+                values = [filter_fields(x[citetype], fields) for x in values.data]
+            else:
+                values = [filter_fields(x, fields) for x in values]
+            return values
 
         def s2_citations_references_subr(request, ssid: str, key) -> str | bytes:
             """Get requested citations or references for a paper.
@@ -283,11 +413,14 @@ class RefMan:
             else:
                 count = None
             offset = int(request.args.get("offset", 0))
+            fields = self._references_fields if key == "references"\
+                else self._citations_fields
             if request.method == "GET":
                 if "filters" in request.args:
-                    return json.dumps("FILTERS NOT SUPPORTED WITH GET")
-                values = func(ssid, offset=offset, limit=count)  # type: ignore
-                return dumps_json(values)
+                    return json.dumps("Filters only supported with POST")
+                values = func(ssid, offset=offset, limit=count)
+                filtered = filter_subr(values, key, fields)
+                return dumps_json(filtered)
             else:
                 if self.debug and hasattr(request, "json"):
                     print("REQUEST JSON", request.json)
@@ -298,7 +431,9 @@ class RefMan:
                     filters = data["filters"]
                     func = self.s2.filter_citations if key == "citations" else\
                         self.s2.filter_references
-                    return dumps_json(func(ssid, filters=filters, num=count))
+                    values = func(ssid, filters=filters, num=count)
+                    filtered = filter_subr(values, key, fields)
+                    return dumps_json(filtered)
 
         @app.route("/s2_citations/<ssid>", methods=["GET", "POST"])
         def s2_citations(ssid: str) -> str | bytes:
@@ -389,7 +524,13 @@ class RefMan:
                     query = request.args["q"]
                 else:
                     return json.dumps("NO QUERY GIVEN")
-                return self.s2.search(query)
+                result = self.s2.search(query)
+                if isinstance(result, dict):
+                    data = result.get("data", [])
+                    if data:
+                        result["data"] = [filter_fields(x, self._search_fields) for x in data]
+                    return result
+                return result
             else:
                 return json.dumps("METHOD NOT IMPLEMENTED")
 
@@ -513,7 +654,7 @@ class RefMan:
             else:
                 return self.logi("Nothing to update")
 
-        @app.route("/force_stop_update_cache")
+        @app.route("/force_stop_update_links_cache")
         def foce_stop_update_cache():
             if not self.pdf_cache_helper:
                 return self.loge("Cache helper is not available.")
@@ -523,7 +664,7 @@ class RefMan:
                 self.pdf_cache_helper.stop_update()
                 return self.logi("Sent signal to stop updating cache")
 
-        @app.route("/cache_updated")
+        @app.route("/links_cache_updated")
         def cache_updated():
             if not self.pdf_cache_helper:
                 return self.loge("Cache helper is not available.")

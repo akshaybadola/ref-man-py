@@ -138,3 +138,21 @@
    - Don't use refs_cache if the path doesn't exist
    - Use semantic scholar graph api search by default and fixed search query bug
 
+** [2024-02-20 Tue 04:27]
+   - Added experimental internal log.py
+   - Don't use refs_cache if the path doesn't exist
+   - Use semantic scholar graph api search by default and fixed search query bug
+
+** [2024-02-20 Tue 04:29]
+   - ~pdf_cache.PDFCache~ has an sqlite backend now.
+   - ~service.RefMan~ is more modular with a ~config.py~ that then
+     is passed on to ~s2cache~, which is now added to ~pyproject.toml~.
+     Though since a copy exists in ~s2cache~, it should be resolved.
+   - Fixed errors in ~RefMan~ filter functions.
+   - New endpoints in ~RefMan~
+     + ~/s2_get_updated_paper~
+     + ~/ensure_citations~
+   - Renamed ~/cache_updated~ to ~/links_cache_updated~ and
+     ~/force_stop_update_cache~ to ~/force_stop_update_links_cache~
+   - Fields are now filtered from ~RefMan~ service instead of from ~s2cache~.
+
