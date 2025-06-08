@@ -1,4 +1,4 @@
-from typing import List, Dict, Callable, Optional, Tuple
+from typing import Callable, Optional, Iterable
 from threading import Thread, Event
 from queue import Queue
 import json
@@ -28,24 +28,26 @@ def is_error(x):
 
 
 def dumps_data_or_error(data: PaperDetails | PaperData | Error) -> str:
-    if is_error(data):
+    if is_error(data) or isinstance(data, dict):
         return dumps_json(data)
-    else:
-        return dumps_json({k: v for k, v in dataclasses.asdict(data).items()
+    elif dataclasses.is_dataclass(data):
+        return dumps_json({k: v for k, v in dataclasses.asdict(data).items()  # type: ignore
                            if v is not None})
+    else:
+        raise TypeError
 
 
-def filter_fields(data, fields):
+def filter_fields(data, fields: Iterable | dict[str, str | list[str]]) -> dict:
     if dataclasses.is_dataclass(data):
-        _data = dataclasses.asdict(data)
+        _data = dataclasses.asdict(data)  # type: ignore
     else:
         _data = copy.deepcopy(data)
     if not _data:
-        import ipdb; ipdb.set_trace()
+        raise ValueError("data should not be empty")
     for k in _data:
         if k not in fields:
             _data[k] = None
-        else:
+        elif isinstance(fields, dict):
             v = fields[k]
             if isinstance(v, list):
                 _data[k] = lens(_data, *v)
@@ -54,7 +56,7 @@ def filter_fields(data, fields):
 
 def check_proxy_port(proxy_port: int, proxy_name: str,
                      logger: logging.Logger) ->\
-        Tuple[bool, str, Dict[str, str]]:
+        tuple[bool, str, dict[str, str]]:
     status = False
     proxies = {"http": f"http://127.0.0.1:{proxy_port}",
                "https": f"http://127.0.0.1:{proxy_port}"}
@@ -78,7 +80,7 @@ def check_proxy_port(proxy_port: int, proxy_name: str,
     return status, msg, proxies
 
 
-def check_proxy(proxies: Dict[str, str], flag: Event):
+def check_proxy(proxies: dict[str, str], flag: Event):
     check_count = 0
     while flag.is_set():
         try:
@@ -98,7 +100,7 @@ def check_proxy(proxies: Dict[str, str], flag: Event):
 
 
 
-def parallel_fetch(urls: List[str], fetch_func: Callable[[str, Queue], None],
+def parallel_fetch(urls: list[str], fetch_func: Callable[[str, Queue], None],
                    batch_size: int):
     def helper(q: Queue):
         responses = {}
@@ -123,7 +125,7 @@ def parallel_fetch(urls: List[str], fetch_func: Callable[[str, Queue], None],
         j += 1
 
 
-def fetch_url_info(url: str) -> Dict[str, str]:
+def fetch_url_info(url: str) -> dict[str, str]:
     response = requests.get(url, headers=default_headers)
     if response.status_code == 200:
         soup = BeautifulSoup(response.content, features="lxml")
@@ -182,7 +184,7 @@ def post_json_wrapper(request: flask.Request, fetch_func: Callable[[str, Queue],
     logger.info(f"Fetching {len(data)} queries from {host}")
     verbose = True
     j = 0
-    content: Dict[str, str] = {}
+    content: dict[str, str] = {}
     while True:
         _data = data[(batch_size * j): (batch_size * (j + 1))].copy()
         for k, v in content.items():
@@ -204,8 +206,8 @@ def post_json_wrapper(request: flask.Request, fetch_func: Callable[[str, Queue],
     return json.dumps(content)
 
 
-def import_icra22_pdfs(files: List[str]):
-    info: Dict[str, Optional[Dict]] = {}
+def import_icra22_pdfs(files: list[str]):
+    info: dict[str, Optional[dict]] = {}
     for f in files:
         out, err = call(f"pdfinfo {f}")
         # Not sure how to check for other IEEE
@@ -216,8 +218,8 @@ def import_icra22_pdfs(files: List[str]):
     return info
 
 
-def import_elsevier_pdfs(files: List[str]):
-    info: Dict[str, Optional[Dict]] = {}
+def import_elsevier_pdfs(files: list[str]):
+    info: dict[str, Optional[dict]] = {}
     for f in files:
         out, err = call(f"pdfinfo {f}")
         # Elsevier?

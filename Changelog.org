@@ -156,3 +156,8 @@
      ~/force_stop_update_cache~ to ~/force_stop_update_links_cache~
    - Fields are now filtered from ~RefMan~ service instead of from ~s2cache~.
 
+** [2025-06-08 Sun 08:56]
+   - Added ~s2_paper_local~ route
+   - Fixed filtering fields when sending paper data or details
+   - Renamed ~corpus_cache_dir~ to ~citations_cache_dir~ to reflect
+     change in ~s2cache~

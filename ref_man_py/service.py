@@ -12,6 +12,8 @@ import requests
 import psutil
 from flask import Flask, request, Response
 from werkzeug import serving
+import magic
+import brotli
 
 from common_pyutil.log import get_file_and_stream_logger, get_stream_logger
 
@@ -126,8 +128,9 @@ class RefMan:
     def _init_s2_and_fields(self):
         self.s2 = SemanticScholar(config_or_file=self.config.s2,
                                   cache_dir=self.data_dir,
-                                  corpus_cache_dir=self.corpus_cache_dir,
+                                  citations_cache_dir=self.corpus_cache_dir,
                                   logger_name="ref-man")
+
         # fields are which are filtered and sent to interface.
         # Determined via config
         self._paper_fields = {x[0] if isinstance(x, list) else x: x
@@ -147,7 +150,14 @@ class RefMan:
         return requests.get(url, timeout=self._requests_timeout, **kwargs)
 
 
-    def _filter_paper_subr(self, fields: dict):
+    def _filter_paper_subr(self, fields: dict[str, str | list[str]]):
+        """Add default fields for :code:`fields` in case they're missing
+
+        Args:
+            fields: Is a mapping of :code:`field` name to a getter, which
+                    can be a string or a list of strings to lookup a value
+                    in a nested :code:`dict`.
+        """
         paper_fields = fields.get("paper_fields", self._paper_fields)
         citations_fields = fields.get("citations_fields", self._citations_fields)
         references_fields = fields.get("references_fields", self._references_fields)
@@ -157,19 +167,15 @@ class RefMan:
             -> PaperDetails:
         fields, paper_fields, citations_fields, references_fields =\
             self._filter_paper_subr(fields)
-        if dataclasses.is_dataclass(data):
-            _data = dataclasses.asdict(data)
-            _data = filter_fields(_data, paper_fields)
-            data = PaperDetails(**_data)
-            if citations_fields != "all":
-                data.citations = [filter_fields(x, citations_fields)
-                                  for x in data.citations]
-            if references_fields != "all":
-                data.references = [filter_fields(x, references_fields)
-                                   for x in data.references]
-            return data
-        else:
-            raise TypeError("data should be a dataclass")
+        _data = filter_fields(data, paper_fields)
+        data = PaperDetails(**_data)
+        if citations_fields != "all":
+            data.citations = [PaperDetails(**filter_fields(x, citations_fields))
+                              for x in filter(None, data.citations)]
+        if references_fields != "all":
+            data.references = [PaperDetails(**filter_fields(x, references_fields))
+                               for x in filter(None, data.references)]
+        return data
 
     def _filter_paper_data(self, data: PaperData, fields: dict)\
             -> PaperData:
@@ -183,21 +189,20 @@ class RefMan:
         """
         fields, paper_fields, citations_fields, references_fields =\
             self._filter_paper_subr(fields)
-        if dataclasses.is_dataclass(data):
-            if paper_fields != "all":
-                _details = filter_fields(data.details, paper_fields)
-                data.details = PaperDetails(**_details)
-            data.citations.data = [x for x in data.citations.data if x["citingPaper"]]
-            data.references.data = [x for x in data.references.data if x["citedPaper"]]
-            if citations_fields != "all":
-                for i, x in enumerate(data.citations.data):
-                    data.citations.data[i]["citingPaper"] = filter_fields(x["citingPaper"], citations_fields)
-            if references_fields != "all":
-                for i, y in enumerate(data.references.data):
-                    data.references.data[i]["citedPaper"] = filter_fields(y["citedPaper"], references_fields)
-            return data
-        else:
-            raise TypeError("data should be a dataclass")
+        if paper_fields != "all":
+            _details: dict = filter_fields(data.details, paper_fields)
+            data.details = PaperDetails(**_details)
+        data.citations.data = [x for x in data.citations.data if x.citingPaper]
+        data.references.data = [x for x in data.references.data if x.citedPaper]
+        if citations_fields != "all":
+            for i, x in enumerate(data.citations.data):
+                data.citations.data[i].citingPaper =\
+                    PaperDetails(**filter_fields(x.citingPaper, citations_fields))
+        if references_fields != "all":
+            for i, y in enumerate(data.references.data):
+                data.references.data[i].citedPaper =\
+                    PaperDetails(**filter_fields(y.citedPaper, references_fields))
+        return data
 
     def _init_remote_cache(self):
         """Initialize cache (and map) of remote and local pdf files.
@@ -289,7 +294,7 @@ class RefMan:
     def init_routes(self):
         def filter_paper_and_dump(data: Error | PaperData | PaperDetails, request) -> str:
             if isinstance(data, Error):
-                return dumps_json(data)
+                return dumps_data_or_error(data)
             if request.method == "POST":
                 post_data = request.json
                 if not post_data:
@@ -301,6 +306,8 @@ class RefMan:
                 data = self._filter_paper_data(data, fields)
             else:
                 data = self._filter_paper_details(data, fields)
+            if fields:
+                data = data.asdict()
             return dumps_data_or_error(data)
 
         @app.route("/arxiv", methods=["GET", "POST"])
@@ -328,10 +335,24 @@ class RefMan:
                 return json.dumps("NO ID_TYPE GIVEN")
             force = bool(request.args.get("force", False))
             paper_data = bool(request.args.get("paper_data", False))
+            local_only = bool(request.args.get("cache_only", False))
             if paper_data:
-                data: Error | PaperData | PaperDetails = self.s2.get_data_for_id(id_type, ID, force)
+                data: Error | PaperData | PaperDetails = self.s2.get_data_for_id(
+                    id_type, ID, force, local_only)
             else:
                 data = self.s2.get_details_for_id(id_type, ID, force)
+            return filter_paper_and_dump(data, request)
+
+        @app.route("/s2_paper_local", methods=["GET", "POST"])
+        def s2_paper_local() -> str:
+            if "corpus_id" not in request.args and "ssid" not in request.args:
+                return "BAD PARAMS"
+            corpus_id = request.args.get("corpus_id", None)
+            ssid = request.args.get("ssid", None)
+            if corpus_id is not None:
+                corpus_id = int(corpus_id)  # type: ignore
+            data: Error | PaperData | PaperDetails = self.s2.get_data_from_corpus_cache(
+                corpus_id=corpus_id, ssid=ssid)
             return filter_paper_and_dump(data, request)
 
         @app.route("/s2_get_updated_paper", methods=["GET"])
@@ -370,7 +391,7 @@ class RefMan:
                 force = False
             details = self.s2.paper_details(ssid, force=force)
             if isinstance(details, Error):
-                return dumps_json(details)
+                return dumps_data_or_error(details)
             details = self._filter_paper_details(details, {})
             return dumps_data_or_error(details)
 
@@ -382,17 +403,18 @@ class RefMan:
                 force = False
             details = self.s2.paper_details(ssid, force=force)
             if isinstance(details, Error):
-                return dumps_json(details)
+                return dumps_data_or_error(details)
             details = self._filter_paper_details(details, {})
             return dumps_data_or_error(details)
 
         def filter_subr(values, key, fields):
             citetype = "citedPaper" if key == "references" else "citingPaper"
             if isinstance(values, (References, Citations)):
-                values = [filter_fields(x[citetype], fields) for x in values.data]
+                if isinstance(values.data[0], dict):
+                    return [filter_fields(x[citetype], fields) for x in values.data]
+                return [filter_fields(dataclasses.asdict(x)[citetype], fields) for x in values.data]
             else:
-                values = [filter_fields(x, fields) for x in values]
-            return values
+                return [filter_fields(x, fields) for x in values]
 
         def s2_citations_references_subr(request, ssid: str, key) -> str | bytes:
             """Get requested citations or references for a paper.
@@ -419,21 +441,23 @@ class RefMan:
                 if "filters" in request.args:
                     return json.dumps("Filters only supported with POST")
                 values = func(ssid, offset=offset, limit=count)
-                filtered = filter_subr(values, key, fields)
-                return dumps_json(filtered)
             else:
                 if self.debug and hasattr(request, "json"):
                     print("REQUEST JSON", request.json)
                 data = request.json
-                if not data or (data and "filters" not in data):
-                    return json.dumps("METHOD NOT IMPLEMENTED IF filters NOT GIVEN")
+                if not data:
+                    return json.dumps("METHOD NOT IMPLEMENTED without data")
                 else:
-                    filters = data["filters"]
-                    func = self.s2.filter_citations if key == "citations" else\
-                        self.s2.filter_references
-                    values = func(ssid, filters=filters, num=count)
-                    filtered = filter_subr(values, key, fields)
-                    return dumps_json(filtered)
+                    filters = data.get("filters")
+                    if filters:
+                        func = self.s2.filter_citations if key == "citations" else\
+                            self.s2.filter_references
+                        values = func(ssid, filters=filters, num=count)
+                    else:
+                        values = func(ssid, offset=offset, limit=count)
+                    fields = data.get("fields", fields)
+            filtered = filter_subr(values, key, fields)
+            return dumps_data_or_error(filtered)
 
         @app.route("/s2_citations/<ssid>", methods=["GET", "POST"])
         def s2_citations(ssid: str) -> str | bytes:
@@ -465,19 +489,24 @@ class RefMan:
 
             See :meth:`SemanticScholar.next_citations` for implementation details.
             """
-            if request.method == "GET":
-                if "filters" in request.args:
-                    return json.dumps("FILTERS NOT SUPPORTED WITH GET")
-                if "count" in request.args:
-                    count = int(request.args["count"])
-                    if count > 10000:
-                        json.dumps("MAX 10000 CITATIONS CAN BE FETCHED AT ONCE.")
-                else:
-                    count = 0
-                return dumps_json(self.s2.next_citations(ssid, count))
+            if "filters" in request.args:
+                return json.dumps("FILTERS NOT SUPPORTED WITH GET")
+            if "count" in request.args:
+                count = int(request.args["count"])
+                if count > 10000:
+                    json.dumps("MAX 10000 CITATIONS CAN BE FETCHED AT ONCE.")
             else:
-                # TODO: Not Implemented yet
-                return json.dumps("METHOD NOT IMPLEMENTED")
+                count = 0
+            if request.method == "GET":
+                return dumps_data_or_error(self.s2.next_citations(ssid, count))
+            else:
+                data = request.json
+                if not data:
+                    return json.dumps("BAD PARAMS")
+                fields = data.get("fields", "all")
+                values = self.s2.next_citations(ssid, count)
+                filtered = filter_subr(values, "citations", fields)
+                return dumps_data_or_error(filtered)
 
         @app.route("/s2_citations_params", methods=["GET", "POST"])
         def s2_citations_params():
@@ -496,7 +525,7 @@ class RefMan:
                 # TODO: Not Implemented yet
                 return json.dumps("METHOD NOT IMPLEMENTED")
 
-        @app.route("/recommendations", methods=["GET", "POST"])
+        @app.route("/s2_recommendations", methods=["GET", "POST"])
         def recommendations():
             """Search Semantic Scholar for a query string via the graph api."""
             count = int(request.args.get("count", 0))
@@ -612,6 +641,12 @@ class RefMan:
                 if not noproxy:
                     self.logger.warning("Proxy dead. Fetching without proxy")
                 response = self._get(url, headers=default_headers)
+            if magic.detect_from_content(response.content).mime_type == "application/octet-stream":
+                try:
+                    content = brotli.decompress(response.content)
+                    response.content = content
+                except Exception:
+                    pass
             if url.startswith("http:") or response.url.startswith("https:"):
                 return Response(response.content)
             elif response.url != url:

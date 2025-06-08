@@ -76,7 +76,7 @@ class Config:
     This class defins both the API config and :class:`s2cache.SemanticScholar` config.
 
     Args:
-        s2: Config
+        s2: dict
         cache_dir: str
         data: DataConfig
         api_key: Optional[str] = None
